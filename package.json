@@ -1,0 +1,40 @@
+{
+  "name": "@cometchat/mcp-server",
+  "version": "0.1.1",
+  "description": "First-party CometChat MCP server. Read-only tools for searching CometChat documentation, fetching pages, and pulling implementation bundles.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "cometchat-mcp": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:index": "tsx scripts/build-index.ts",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "inspect": "npx @modelcontextprotocol/inspector"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "better-sqlite3": "^11.5.0",
+    "express": "^4.21.1",
+    "gray-matter": "^4.0.3",
+    "pino": "^9.5.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
