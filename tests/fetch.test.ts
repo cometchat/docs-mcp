@@ -53,4 +53,22 @@ describe("runFetch", () => {
     const r = await runFetch({ path: "/sdk/javascript/overview.mdx" }, opts);
     expect(r.url).toBe("https://www.cometchat.com/docs/sdk/javascript/overview");
   });
+
+  it("translates 3xx redirect to NotFoundError", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("", { status: 307 })) as any;
+    await expect(runFetch({ path: "/missing/page" }, opts)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("treats docs-homepage payload as NotFoundError", async () => {
+    const homepage = [
+      "> ## Documentation Index",
+      "> Fetch the complete documentation index at: https://www.cometchat.com/docs/llms.txt",
+      "> Use this file to discover all available pages before exploring further.",
+      "",
+      "# Home",
+      "> Technical documentation & Implementation guides to add In-app Messaging & Voice & Video Calling to your apps and websites in minutes.",
+    ].join("\n");
+    globalThis.fetch = vi.fn(async () => new Response(homepage, { status: 200 })) as any;
+    await expect(runFetch({ path: "/missing/page" }, opts)).rejects.toBeInstanceOf(NotFoundError);
+  });
 });

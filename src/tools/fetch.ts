@@ -56,6 +56,7 @@ export async function runFetch(input: unknown, opts: FetchOpts) {
   try {
     response = await fetch(mdUrl, {
       signal: controller.signal,
+      redirect: "manual",
       headers: { Accept: "text/markdown, text/plain;q=0.9" },
     });
   } catch (err) {
@@ -71,12 +72,19 @@ export async function runFetch(input: unknown, opts: FetchOpts) {
   if (response.status === 404) {
     throw new NotFoundError(urlPath);
   }
+  if (response.status >= 300 && response.status < 400) {
+    // Unknown docs paths redirect (typically to /docs root). Treat as not-found.
+    throw new NotFoundError(urlPath);
+  }
   if (!response.ok) {
     logger.warn({ status: response.status, mdUrl }, "fetch_non_ok");
     throw new BackendError();
   }
 
   const fullText = await response.text();
+  if (looksLikeDocsHomepage(fullText, urlPath)) {
+    throw new NotFoundError(urlPath);
+  }
   const title = extractTitle(fullText, urlPath);
   const section = extractSection(urlPath);
   const safe = truncateAtParagraph(fullText, FETCH_MAX_BYTES, url);
@@ -88,6 +96,18 @@ export async function runFetch(input: unknown, opts: FetchOpts) {
     content: safe,
     contentLength: byteLength(safe),
   };
+}
+
+const HOMEPAGE_MARKERS = [
+  "Documentation Index",
+  "Fetch the complete documentation index",
+  "Technical documentation & Implementation guides to add In-app Messaging",
+];
+
+function looksLikeDocsHomepage(body: string, urlPath: string): boolean {
+  if (urlPath === "" || urlPath === "/") return false;
+  const head = body.slice(0, 1200);
+  return HOMEPAGE_MARKERS.every((marker) => head.includes(marker));
 }
 
 function resolvePath(input: string, docsBaseUrl: string): { url: string; mdUrl: string; urlPath: string } {
