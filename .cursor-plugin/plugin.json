@@ -1,0 +1,34 @@
+{
+  "name": "cometchat",
+  "description": "Add real-time chat, voice, video, and moderation to your app — Cursor's agent reads CometChat documentation, fetches reference pages, and pulls curated implementation bundles for React, React Native, Flutter, iOS, Android, the JavaScript SDK, the no-code widget, moderation, multi-tenant chat, and presence.",
+  "version": "0.1.2",
+  "author": {
+    "name": "CometChat",
+    "email": "support@cometchat.com"
+  },
+  "homepage": "https://www.cometchat.com",
+  "repository": "https://github.com/cometchat/docs-mcp",
+  "license": "Apache-2.0",
+  "keywords": [
+    "chat",
+    "messaging",
+    "real-time",
+    "voice",
+    "video",
+    "calling",
+    "moderation",
+    "documentation",
+    "ai-coding-agent",
+    "react",
+    "react-native",
+    "flutter",
+    "ios",
+    "android"
+  ],
+  "logo": "assets/logo.svg",
+  "mcpServers": {
+    "cometchat": {
+      "url": "https://mcp.cometchat.com/mcp"
+    }
+  }
+}
