@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "cometchat",
+  "owner": {
+    "name": "CometChat",
+    "email": "support@cometchat.com"
+  },
+  "metadata": {
+    "description": "CometChat's official Claude Code plugin — add real-time chat, voice, video, and moderation to your app.",
+    "version": "0.1.3"
+  },
+  "plugins": [
+    {
+      "name": "cometchat",
+      "source": "./",
+      "displayName": "CometChat",
+      "description": "Add real-time chat, voice, video, and moderation to your app. Claude reads CometChat documentation, fetches reference pages, and pulls curated implementation bundles for React, React Native, Flutter, iOS, Android, the JavaScript SDK, the no-code widget, moderation, multi-tenant chat, and presence. Read-only, no authentication required.",
+      "version": "0.1.3",
+      "author": {
+        "name": "CometChat",
+        "email": "support@cometchat.com"
+      },
+      "homepage": "https://www.cometchat.com/docs/mcp-server",
+      "repository": "https://github.com/cometchat/docs-mcp",
+      "license": "Apache-2.0",
+      "category": "documentation",
+      "keywords": [
+        "chat",
+        "messaging",
+        "real-time",
+        "voice",
+        "video",
+        "calling",
+        "moderation",
+        "documentation",
+        "mcp"
+      ]
+    }
+  ]
+}
