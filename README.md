@@ -5,6 +5,7 @@
 **Add real-time chat, voice, video, and moderation to your app through your AI coding agent.**
 
 [![Smithery](https://img.shields.io/badge/Smithery-listed-blue)](https://smithery.ai/server/@cometchat/docs-mcp)
+[![Listed on ClaudePluginHub](https://www.claudepluginhub.com/badge/cometchat-cometchat)](https://www.claudepluginhub.com/plugins/cometchat-cometchat?ref=badge)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-2025--06--18-purple)](https://modelcontextprotocol.io)
 [![Status](https://img.shields.io/badge/status-live-brightgreen)](https://mcp.cometchat.com/health)

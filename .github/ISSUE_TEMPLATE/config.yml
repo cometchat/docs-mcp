@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: CometChat documentation
+    url: https://www.cometchat.com/docs
+    about: Product and SDK documentation.
+  - name: CometChat support
+    url: https://www.cometchat.com
+    about: Account, billing, or product questions (not MCP server bugs).
+  - name: MCP server status
+    url: https://mcp.cometchat.com/health
+    about: Live health of the hosted server.
