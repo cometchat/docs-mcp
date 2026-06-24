@@ -1,6 +1,6 @@
 {
   "name": "@cometchat/mcp-server",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "First-party CometChat MCP server. Read-only tools for searching CometChat documentation, fetching pages, and pulling implementation bundles.",
   "license": "Apache-2.0",
   "type": "module",
@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "better-sqlite3": "^11.5.0",
+    "better-sqlite3": "^12.11.1",
     "express": "^4.22.2",
     "gray-matter": "^4.0.3",
     "pino": "^9.5.0",

@@ -24,6 +24,14 @@ Ask the agent: *"add a chat tab where users can DM each other"* — it reads Com
 
 ---
 
+## Demo
+
+![CometChat MCP server in action](assets/demo.gif)
+
+*An AI agent reading CometChat's docs and writing a working chat integration from a single prompt.*
+
+---
+
 ## Quick install
 
 | Agent | How to add |
@@ -120,7 +128,7 @@ CometChat is a real-time communications platform for adding chat, voice, and vid
 | Field | Value |
 |---|---|
 | Display name | CometChat Documentation |
-| Version | 0.1.3 |
+| Version | 0.1.4 |
 | Protocol | MCP `2025-06-18` |
 | Transport | Streamable HTTP (with SSE) |
 | Authentication | None (public docs only) |
