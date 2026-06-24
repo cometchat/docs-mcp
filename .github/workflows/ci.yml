@@ -60,7 +60,7 @@ jobs:
           INDEX_PATH: ${{ github.workspace }}/cometchat-mcp/data/index.sqlite
         run: npm run build:index
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: search-index
           path: cometchat-mcp/data/index.sqlite
