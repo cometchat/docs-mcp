@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.cometchat/docs-mcp",
+  "description": "CometChat docs search + implementation bundles: add chat, voice, video & moderation to your app.",
+  "repository": {
+    "url": "https://github.com/cometchat/docs-mcp",
+    "source": "github"
+  },
+  "version": "0.1.4",
+  "websiteUrl": "https://www.cometchat.com/docs/mcp-server",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.cometchat.com/mcp"
+    }
+  ]
+}
