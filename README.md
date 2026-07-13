@@ -4,7 +4,7 @@
 
 **Add real-time chat, voice, video, and moderation to your app through your AI coding agent.**
 
-[![Smithery](https://img.shields.io/badge/Smithery-listed-blue)](https://smithery.ai/server/@cometchat/docs-mcp)
+[![smithery badge](https://smithery.ai/badge/cometchat/docs-mcp)](https://smithery.ai/servers/cometchat/docs-mcp)
 [![Listed on ClaudePluginHub](https://www.claudepluginhub.com/badge/cometchat-cometchat)](https://www.claudepluginhub.com/plugins/cometchat-cometchat?ref=badge)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-2025--06--18-purple)](https://modelcontextprotocol.io)
@@ -243,7 +243,7 @@ The same server URL is listed across multiple agent marketplaces:
 
 | Marketplace | Listing |
 |---|---|
-| Smithery | [`smithery.ai/server/@cometchat/docs-mcp`](https://smithery.ai/server/@cometchat/docs-mcp) |
+| Smithery | [`smithery.ai/servers/cometchat/docs-mcp`](https://smithery.ai/servers/cometchat/docs-mcp) |
 | Cursor Marketplace | `cursor.com/marketplace` |
 | Cursor Directory | `cursor.directory` |
 | Anthropic Connector Directory | `claude.com/connectors` |
