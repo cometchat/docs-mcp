@@ -1,7 +1,7 @@
 {
   "name": "cometchat",
   "description": "Add real-time chat, voice, video, and moderation to your app — Cursor's agent reads CometChat documentation, fetches reference pages, and pulls curated implementation bundles for React, React Native, Flutter, iOS, Android, the JavaScript SDK, the no-code widget, moderation, multi-tenant chat, and presence.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "author": {
     "name": "CometChat",
     "email": "support@cometchat.com"

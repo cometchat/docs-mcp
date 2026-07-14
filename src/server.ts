@@ -35,7 +35,7 @@ import {
   runBundle,
 } from "./tools/bundle.js";
 
-const SERVER_NAME = "CometChat Documentation";
+const SERVER_NAME = "CometChat Docs";
 const SERVER_VERSION = readPackageVersion();
 const SESSION_HEADER = "mcp-session-id";
 
@@ -182,6 +182,16 @@ async function main() {
       return;
     }
     next();
+  });
+
+  // Glama connector-ownership proof (https://glama.ai/mcp/schemas/connector.json):
+  // Glama polls this path on the server's domain and matches the email against
+  // a Glama account to grant listing ownership.
+  app.get("/.well-known/glama.json", (_req, res) => {
+    res.json({
+      $schema: "https://glama.ai/mcp/schemas/connector.json",
+      maintainers: [{ email: "ketan.yekale@cometchat.com" }],
+    });
   });
 
   app.get("/health", (_req, res) => {

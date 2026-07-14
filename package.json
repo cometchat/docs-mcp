@@ -1,6 +1,6 @@
 {
   "name": "@cometchat/mcp-server",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "First-party CometChat MCP server. Read-only tools for searching CometChat documentation, fetching pages, and pulling implementation bundles.",
   "license": "Apache-2.0",
   "type": "module",

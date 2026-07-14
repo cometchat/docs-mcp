@@ -127,8 +127,8 @@ CometChat is a real-time communications platform for adding chat, voice, and vid
 
 | Field | Value |
 |---|---|
-| Display name | CometChat Documentation |
-| Version | 0.1.4 |
+| Display name | CometChat Docs |
+| Version | 0.1.5 |
 | Protocol | MCP `2025-06-18` |
 | Transport | Streamable HTTP (with SSE) |
 | Authentication | None (public docs only) |
