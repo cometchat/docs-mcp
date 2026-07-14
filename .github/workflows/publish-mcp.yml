@@ -1,0 +1,61 @@
+name: Publish to MCP Registry
+
+# Publishes server.json to the Official MCP Registry (io.github.cometchat/docs-mcp)
+# via GitHub Actions OIDC — no user tokens or secrets. The registry derives the
+# io.github.cometchat/* grant from the OIDC token's repository_owner claim, so
+# this only works when the workflow runs in the cometchat org.
+#
+# This file is authored in the private repo (cometchat-team/docs-mcp) and
+# mirrored to the public repo (cometchat/docs-mcp) by the sync. The
+# repository_owner gate below makes the private-side copy skip cleanly; only
+# the public-side copy publishes.
+#
+# Triggers: publishing a GitHub release on the public repo (the tag/version
+# must match server.json), or manual dispatch for re-runs.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    if: github.repository_owner == 'cometchat'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC token for registry authentication
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check server.json version matches the release tag
+        if: github.event_name == 'release'
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VER="$(jq -r .version server.json)"
+          if [ "v$VER" != "$TAG" ]; then
+            echo "::error::server.json is v$VER but the release tag is $TAG — bump server.json before releasing"
+            exit 1
+          fi
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry (OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish
+
+      - name: Verify registry shows the published version
+        run: |
+          VER="$(jq -r .version server.json)"
+          for i in 1 2 3; do
+            sleep 5
+            if curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=cometchat" | grep -q "\"version\":\"$VER\""; then
+              echo "registry shows v$VER ✓"; exit 0
+            fi
+          done
+          echo "::warning::registry does not yet show v$VER — verify manually"
