@@ -4,7 +4,11 @@
 
 **Add real-time chat, voice, video, and moderation to your app through your AI coding agent.**
 
+[![CI](https://github.com/cometchat/docs-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/cometchat/docs-mcp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cometchat/docs-mcp)](https://github.com/cometchat/docs-mcp/releases)
+[![MCP Registry](https://img.shields.io/badge/dynamic/json?label=MCP%20Registry&prefix=v&query=%24.servers%5B0%5D.server.version&url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dio.github.cometchat%2Fdocs-mcp%26version%3Dlatest&color=8A2BE2)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.cometchat/docs-mcp&version=latest)
 [![smithery badge](https://smithery.ai/badge/cometchat/docs-mcp)](https://smithery.ai/servers/cometchat/docs-mcp)
+[![docs-mcp MCP server](https://glama.ai/mcp/servers/cometchat/docs-mcp/badges/score.svg)](https://glama.ai/mcp/servers/cometchat/docs-mcp)
 [![Listed on ClaudePluginHub](https://www.claudepluginhub.com/badge/cometchat-cometchat)](https://www.claudepluginhub.com/plugins/cometchat-cometchat?ref=badge)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-2025--06--18-purple)](https://modelcontextprotocol.io)
@@ -244,6 +248,7 @@ The same server URL is listed across multiple agent marketplaces:
 | Marketplace | Listing |
 |---|---|
 | Smithery | [`smithery.ai/servers/cometchat/docs-mcp`](https://smithery.ai/servers/cometchat/docs-mcp) |
+| Glama | [`glama.ai/mcp/servers/cometchat/docs-mcp`](https://glama.ai/mcp/servers/cometchat/docs-mcp) |
 | Cursor Marketplace | `cursor.com/marketplace` |
 | Cursor Directory | `cursor.directory` |
 | Anthropic Connector Directory | `claude.com/connectors` |
