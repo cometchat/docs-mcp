@@ -31,6 +31,32 @@ export const SEARCH_TOOL_DEFINITION = {
     required: ["query"],
     additionalProperties: false,
   },
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      results: {
+        type: "array",
+        description: "Ranked search results.",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Page title." },
+            url: { type: "string", description: "Direct link to the source page." },
+            snippet: { type: "string", description: "Matched excerpt with context." },
+            section: { type: "string", description: "Documentation section the page belongs to." },
+          },
+          required: ["title", "url", "snippet", "section"],
+          additionalProperties: false,
+        },
+      },
+      totalAvailable: {
+        type: "number",
+        description: "Total matching pages available (may exceed the returned count).",
+      },
+    },
+    required: ["results", "totalAvailable"],
+    additionalProperties: false,
+  },
   annotations: {
     title: "Search CometChat Documentation",
     readOnlyHint: true,

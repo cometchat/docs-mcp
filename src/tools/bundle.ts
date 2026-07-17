@@ -21,6 +21,19 @@ export const BUNDLE_TOOL_DEFINITION = {
     required: ["bundle"],
     additionalProperties: false,
   },
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      bundle: { type: "string", description: "Bundle identifier." },
+      title: { type: "string", description: "Human-readable bundle title." },
+      framework: { type: "string", description: "Target framework/platform." },
+      prerequisites: { type: "array", items: { type: "string" }, description: "Prerequisites before applying the bundle." },
+      last_verified: { type: "string", description: "Date the bundle was last verified against live SDK versions." },
+      content: { type: "string", description: "The full implementation recipe as markdown." },
+    },
+    required: ["bundle", "title", "framework", "prerequisites", "last_verified", "content"],
+    additionalProperties: false,
+  },
   annotations: {
     title: "Get CometChat Implementation Bundle",
     readOnlyHint: true,

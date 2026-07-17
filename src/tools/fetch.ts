@@ -23,6 +23,18 @@ export const FETCH_TOOL_DEFINITION = {
     required: ["path"],
     additionalProperties: false,
   },
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      title: { type: "string", description: "Page title." },
+      url: { type: "string", description: "Canonical page URL." },
+      section: { type: "string", description: "Documentation section the page belongs to." },
+      content: { type: "string", description: "Full page content as markdown (truncated if very large)." },
+      contentLength: { type: "number", description: "Content length in bytes after truncation." },
+    },
+    required: ["title", "url", "section", "content", "contentLength"],
+    additionalProperties: false,
+  },
   annotations: {
     title: "Fetch CometChat Documentation Page",
     readOnlyHint: true,

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  LIST_BUNDLES_TOOL_DEFINITION,
+} from "../src/tools/list-bundles.js";
+import {
   SEARCH_TOOL_DEFINITION,
   runSearch,
 } from "../src/tools/search.js";
@@ -21,7 +24,7 @@ const bundlesDir = path.resolve(here, "../bundles");
 
 describe("tool definitions", () => {
   it("expose title + readOnlyHint annotations", () => {
-    for (const t of [SEARCH_TOOL_DEFINITION, FETCH_TOOL_DEFINITION, BUNDLE_TOOL_DEFINITION]) {
+    for (const t of [SEARCH_TOOL_DEFINITION, FETCH_TOOL_DEFINITION, BUNDLE_TOOL_DEFINITION, LIST_BUNDLES_TOOL_DEFINITION]) {
       expect(t.annotations.title.length).toBeGreaterThan(0);
       expect(t.annotations.readOnlyHint).toBe(true);
       expect(t.name.length).toBeLessThanOrEqual(64);
@@ -37,7 +40,7 @@ describe("tool definitions", () => {
       /after .* call/i,
       /if you need/i,
     ];
-    for (const t of [SEARCH_TOOL_DEFINITION, FETCH_TOOL_DEFINITION, BUNDLE_TOOL_DEFINITION]) {
+    for (const t of [SEARCH_TOOL_DEFINITION, FETCH_TOOL_DEFINITION, BUNDLE_TOOL_DEFINITION, LIST_BUNDLES_TOOL_DEFINITION]) {
       for (const re of banlist) {
         expect(t.description).not.toMatch(re);
       }

@@ -43,7 +43,7 @@ Ask the agent: *"add a chat tab where users can DM each other"* — it reads Com
 | **Claude.ai / Claude Desktop** | Settings → Connectors → Add custom connector → URL: `https://mcp.cometchat.com/mcp` |
 | **Cursor** | `Cmd+Shift+P` → Open MCP settings → Add custom MCP → paste config below |
 | **Windsurf** | Plugins (hammer icon) → Manage plugins → View raw config → paste config below |
-| **VS Code (Copilot Agent)** | `Cmd+Shift+P` → MCP: Add MCP Server → URL: `https://mcp.cometchat.com/mcp`, Transport: SSE |
+| **VS Code (Copilot Agent)** | `Cmd+Shift+P` → MCP: Add MCP Server → URL: `https://mcp.cometchat.com/mcp`, Transport: HTTP |
 | **Claude Code (CLI)** | `claude mcp add --transport http cometchat https://mcp.cometchat.com/mcp` |
 | **Smithery** | `npx -y smithery mcp add cometchat/docs-mcp` |
 | **Codex CLI** | `codex plugin marketplace add cometchat/docs-mcp` |
@@ -79,13 +79,12 @@ The agent reads CometChat's documentation, pulls the relevant implementation bun
 
 ## Tools
 
-| Name | Purpose |
-|---|---|
-| `search_cometchat_docs` | Search across SDK guides, UI Kit references, REST API documentation, and OpenAPI specs. Returns ranked snippets with titles + direct links. Optional `version` filter. |
-| `fetch_cometchat_doc_page` | Fetch the full content of any documentation page as markdown by URL or relative path. |
-| `get_cometchat_implementation_bundle` | Return a curated implementation bundle for a named scenario — prerequisites, install commands, configuration, working code. |
+- `search_cometchat_docs` — Search across SDK guides, UI Kit references, REST API documentation, and OpenAPI specs. Returns ranked snippets with titles + direct links. Optional `version` filter.
+- `fetch_cometchat_doc_page` — Fetch the full content of any documentation page as markdown by URL or relative path.
+- `get_cometchat_implementation_bundle` — Return a curated implementation bundle for a named scenario — prerequisites, install commands, configuration, working code.
+- `list_cometchat_bundles` — List every available implementation bundle (identifier, title, framework, last-verified date) for discovery.
 
-All three carry `readOnlyHint: true` and a `title` annotation. Names are ≤ 64 characters. Descriptions describe contracts only — no behavioral instructions to the agent, no cross-tool routing, no marketing language.
+All four carry `readOnlyHint: true`, a `title` annotation, and a declared `outputSchema` with structured results. Names are ≤ 64 characters. Descriptions describe contracts only — no behavioral instructions to the agent, no cross-tool routing, no marketing language.
 
 ## Resources
 
@@ -132,7 +131,7 @@ CometChat is a real-time communications platform for adding chat, voice, and vid
 | Field | Value |
 |---|---|
 | Display name | CometChat Docs |
-| Version | 0.1.5 |
+| Version | 0.1.6 |
 | Protocol | MCP `2025-06-18` |
 | Transport | Streamable HTTP (with SSE) |
 | Authentication | None (public docs only) |
@@ -184,7 +183,7 @@ npx @modelcontextprotocol/inspector
 # add server: http://localhost:3000/mcp
 ```
 
-You should see all 3 tools with `readOnlyHint: true` and all 11 resources.
+You should see all 4 tools with `readOnlyHint: true` and all 11 resources.
 
 ### Repo layout
 

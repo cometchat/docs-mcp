@@ -5,12 +5,12 @@ Target: `https://mcp.cometchat.com` (subdomain to confirm with DevOps).
 ## Container
 
 ```
-docker build -t cometchat-mcp:0.1.5 .
+docker build -t cometchat-mcp:0.1.6 .
 docker run --rm -p 3000:3000 \
   -v $(pwd)/data:/app/data \
   -e NODE_ENV=production \
   -e ALLOWED_HOSTS=mcp.cometchat.com \
-  cometchat-mcp:0.1.5
+  cometchat-mcp:0.1.6
 ```
 
 The image bundles `bundles/`, `skills/`, and the compiled server. The SQLite

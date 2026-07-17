@@ -15,17 +15,25 @@ const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
+// Treat empty-string env vars as unset: orchestrators (sandboxes, PaaS UIs)
+// commonly inject declared-but-empty variables, and "" would otherwise
+// override defaults and break paths/enums.
+function env(name: string): string | undefined {
+  const v = process.env[name];
+  return v === "" ? undefined : v;
+}
+
 export function loadConfig(): Config {
   return ConfigSchema.parse({
-    port: process.env.PORT,
-    host: process.env.HOST,
-    docsBaseUrl: process.env.DOCS_BASE_URL,
-    indexPath: process.env.INDEX_PATH,
-    bundlesDir: process.env.BUNDLES_DIR,
-    skillsDir: process.env.SKILLS_DIR,
-    fetchTimeoutMs: process.env.FETCH_TIMEOUT_MS,
-    searchTimeoutMs: process.env.SEARCH_TIMEOUT_MS,
-    logLevel: process.env.LOG_LEVEL,
-    nodeEnv: process.env.NODE_ENV,
+    port: env("PORT"),
+    host: env("HOST"),
+    docsBaseUrl: env("DOCS_BASE_URL"),
+    indexPath: env("INDEX_PATH"),
+    bundlesDir: env("BUNDLES_DIR"),
+    skillsDir: env("SKILLS_DIR"),
+    fetchTimeoutMs: env("FETCH_TIMEOUT_MS"),
+    searchTimeoutMs: env("SEARCH_TIMEOUT_MS"),
+    logLevel: env("LOG_LEVEL"),
+    nodeEnv: env("NODE_ENV"),
   });
 }

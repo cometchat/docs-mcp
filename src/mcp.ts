@@ -29,12 +29,17 @@ import {
   BUNDLE_TOOL_NAME,
   runBundle,
 } from "./tools/bundle.js";
+import {
+  LIST_BUNDLES_TOOL_DEFINITION,
+  LIST_BUNDLES_TOOL_NAME,
+  runListBundles,
+} from "./tools/list-bundles.js";
 
 export const SERVER_NAME = "CometChat Docs";
 export const SERVER_VERSION = readPackageVersion();
 
 export const SERVER_INSTRUCTIONS =
-  "Use this server to integrate CometChat — real-time chat, voice/video, and moderation — into web and mobile apps. Read the cometchat://skills/overview resource first for orientation. Use search_cometchat_docs for conceptual queries, fetch_cometchat_doc_page to read a specific page, and get_cometchat_implementation_bundle for ready-to-use recipes (React, React Native, Flutter, iOS, Android, JavaScript SDK, widget, moderation, multi-tenant, presence).";
+  "Use this server to integrate CometChat — real-time chat, voice/video, and moderation — into web and mobile apps. Read the cometchat://skills/overview resource first for orientation. Use search_cometchat_docs for conceptual queries, fetch_cometchat_doc_page to read a specific page, and get_cometchat_implementation_bundle for ready-to-use recipes (React, React Native, Flutter, iOS, Android, JavaScript SDK, widget, moderation, multi-tenant, presence). Call list_cometchat_bundles to discover which bundles exist.";
 
 export interface McpServerDeps {
   config: Config;
@@ -60,7 +65,12 @@ export function buildMcpServer(deps: McpServerDeps): Server {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [SEARCH_TOOL_DEFINITION, FETCH_TOOL_DEFINITION, BUNDLE_TOOL_DEFINITION],
+    tools: [
+      SEARCH_TOOL_DEFINITION,
+      FETCH_TOOL_DEFINITION,
+      BUNDLE_TOOL_DEFINITION,
+      LIST_BUNDLES_TOOL_DEFINITION,
+    ],
   }));
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -94,6 +104,9 @@ export function buildMcpServer(deps: McpServerDeps): Server {
         case BUNDLE_TOOL_NAME:
           result = runBundle(args, bundleStore);
           break;
+        case LIST_BUNDLES_TOOL_NAME:
+          result = runListBundles(bundleStore);
+          break;
         default:
           return errorResult(`Unknown tool '${name}'.`);
       }
@@ -103,6 +116,7 @@ export function buildMcpServer(deps: McpServerDeps): Server {
       );
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result as Record<string, unknown>,
       };
     } catch (err) {
       const structured = asStructured(err);
