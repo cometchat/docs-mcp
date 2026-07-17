@@ -71,8 +71,9 @@ export class SqliteSearchClient implements SearchClient {
         `Search index not found at ${this.indexPath}. Run \`npm run build:index\` against a clone of cometchat/docs first.`,
       );
     }
+    // No journal-mode pragma here: changing journal modes writes to the
+    // database, which fails on a read-only index mount (SQLITE_READONLY_DIRECTORY).
     const db = new Database(this.indexPath, { readonly: true, fileMustExist: true });
-    db.pragma("journal_mode = WAL");
     this.prepared = {
       db,
       searchStmt: db.prepare(FTS_QUERY),

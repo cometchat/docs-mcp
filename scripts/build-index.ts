@@ -119,6 +119,9 @@ async function main() {
   insertMany(rows);
   db.exec(`INSERT INTO pages_fts(pages_fts) VALUES('optimize');`);
   const total = db.prepare(`SELECT COUNT(*) AS n FROM pages`).get() as { n: number };
+  // Finalize out of WAL: a WAL-mode file needs writable -wal/-shm siblings even
+  // for readonly opens, which breaks read-only index mounts in production.
+  db.pragma("journal_mode = DELETE");
   db.close();
   console.error(`Index built: ${total.n} pages → ${INDEX_PATH}`);
 }
