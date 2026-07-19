@@ -7,6 +7,8 @@ import {
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  McpError,
+  ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "./config.js";
 import { logger } from "./lib/logger.js";
@@ -108,17 +110,20 @@ export function buildMcpServer(deps: McpServerDeps): Server {
           result = runListBundles(bundleStore);
           break;
         default:
-          return errorResult(`Unknown tool '${name}'.`);
+          // Unknown tool is a protocol error (-32602), not a tool-result error
+          // (matches the SDK's own McpServer behavior).
+          throw new McpError(ErrorCode.InvalidParams, `Tool ${name} not found`);
       }
       logger.info(
         { tool: name, duration_ms: Date.now() - start, status: "success" },
         "tool_invocation",
       );
       return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: result as Record<string, unknown>,
       };
     } catch (err) {
+      if (err instanceof McpError) throw err;
       const structured = asStructured(err);
       if (structured.code === "internal_error") {
         logger.error({ tool: name, err }, "tool_invocation_failed");

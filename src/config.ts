@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { envVar as env } from "./lib/env.js";
 
 const ConfigSchema = z.object({
   port: z.coerce.number().int().positive().default(3000),
@@ -14,14 +15,6 @@ const ConfigSchema = z.object({
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
-
-// Treat empty-string env vars as unset: orchestrators (sandboxes, PaaS UIs)
-// commonly inject declared-but-empty variables, and "" would otherwise
-// override defaults and break paths/enums.
-function env(name: string): string | undefined {
-  const v = process.env[name];
-  return v === "" ? undefined : v;
-}
 
 export function loadConfig(): Config {
   return ConfigSchema.parse({

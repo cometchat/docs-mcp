@@ -46,6 +46,17 @@ describe("tool definitions", () => {
       }
     }
   });
+
+  it("descriptions do not reference other tools (no cross-tool routing)", () => {
+    const defs = [SEARCH_TOOL_DEFINITION, FETCH_TOOL_DEFINITION, BUNDLE_TOOL_DEFINITION, LIST_BUNDLES_TOOL_DEFINITION];
+    for (const t of defs) {
+      for (const other of defs) {
+        if (other.name !== t.name) {
+          expect(t.description).not.toContain(other.name);
+        }
+      }
+    }
+  });
 });
 
 describe("runSearch input validation", () => {

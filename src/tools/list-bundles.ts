@@ -6,7 +6,7 @@ export const LIST_BUNDLES_TOOL_DEFINITION = {
   name: LIST_BUNDLES_TOOL_NAME,
   title: "List CometChat Implementation Bundles",
   description:
-    "Lists every available implementation bundle with its identifier, title, target framework, and last-verified date. Use this to discover which ready-to-run recipes exist before requesting one with get_cometchat_implementation_bundle.",
+    "Lists every available CometChat implementation bundle with its identifier, title, target framework, and last-verified date.",
   inputSchema: {
     type: "object" as const,
     properties: {},

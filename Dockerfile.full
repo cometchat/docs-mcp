@@ -1,0 +1,45 @@
+# Immutable image with the docs search index BAKED IN — for image-based
+# deploys (ECS). Kept separate from the main Dockerfile so that plain
+# `docker build .` stays hermetic on every builder (legacy builders execute
+# all stages in a file, which would otherwise pull the docs repo).
+#
+# Two-step build:
+#   docker build -t cometchat-mcp:<ver> .
+#   docker build -f Dockerfile.full \
+#     --build-arg BASE_IMAGE=cometchat-mcp:<ver> \
+#     --build-arg DOCS_COMMIT=$(git ls-remote https://github.com/cometchat/docs.git HEAD | cut -f1) \
+#     -t cometchat-mcp:<ver>-docs .
+#
+# DOCS_COMMIT is the cache-buster AND provenance label: pass the current docs
+# HEAD sha on every build — an unchanged sha legitimately reuses the cached
+# index; a new sha forces a fresh clone+index. Never omit it in CI, or warm
+# caches will silently ship a stale index.
+ARG BASE_IMAGE=cometchat-mcp:latest
+
+FROM ${BASE_IMAGE} AS indexer
+USER root
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates >/dev/null \
+    && rm -rf /var/lib/apt/lists/*
+ARG DOCS_REPO_URL=https://github.com/cometchat/docs.git
+ARG DOCS_REF=main
+ARG DOCS_COMMIT=unpinned
+# Sparse, blobless clone restricted to top-level files + *.mdx anywhere
+# ('/*' keeps root files, '!/*/' drops directories, '**/*.mdx' re-includes
+# the docs tree) — fetches a few MB instead of the full ~1GB repo content.
+# When DOCS_COMMIT is a sha, the build checks it out, so the label below is
+# guaranteed to match the content actually indexed; "unpinned" builds take
+# the branch HEAD at clone time.
+RUN echo "baking index: ${DOCS_REPO_URL}@${DOCS_REF} (${DOCS_COMMIT})" \
+    && git clone --depth 1 --filter=blob:none --sparse --branch "${DOCS_REF}" "${DOCS_REPO_URL}" /tmp/docs \
+    && git -C /tmp/docs sparse-checkout set --no-cone '/*' '!/*/' '**/*.mdx' \
+    && if [ "${DOCS_COMMIT}" != "unpinned" ]; then \
+         git -C /tmp/docs fetch --depth 1 origin "${DOCS_COMMIT}" \
+         && git -C /tmp/docs checkout "${DOCS_COMMIT}"; \
+       fi \
+    && DOCS_REPO=/tmp/docs INDEX_PATH=/app/data/index.sqlite npx tsx scripts/build-index.ts \
+    && rm -rf /tmp/docs
+
+FROM ${BASE_IMAGE}
+ARG DOCS_COMMIT=unpinned
+LABEL com.cometchat.docs-commit="${DOCS_COMMIT}"
+COPY --from=indexer --chown=node:node /app/data/index.sqlite /app/data/index.sqlite

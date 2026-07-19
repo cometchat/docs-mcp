@@ -3,6 +3,7 @@ import express, { type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig } from "./config.js";
+import { envVar } from "./lib/env.js";
 import { logger } from "./lib/logger.js";
 import { SqliteSearchClient } from "./search/sqlite.js";
 import { BundleStore } from "./bundles/loader.js";
@@ -22,13 +23,13 @@ async function main() {
 
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
-  const allowedHosts = parseList(process.env.ALLOWED_HOSTS) ?? [
+  const allowedHosts = parseList(envVar("ALLOWED_HOSTS")) ?? [
     `${config.host}:${config.port}`,
     `localhost:${config.port}`,
     `127.0.0.1:${config.port}`,
   ];
-  const allowedOrigins = parseList(process.env.ALLOWED_ORIGINS);
-  const dnsRebindingProtection = process.env.DNS_REBINDING_PROTECTION !== "false";
+  const allowedOrigins = parseList(envVar("ALLOWED_ORIGINS"));
+  const dnsRebindingProtection = envVar("DNS_REBINDING_PROTECTION") !== "false";
 
   async function createSessionTransport(): Promise<StreamableHTTPServerTransport> {
     const transport = new StreamableHTTPServerTransport({
@@ -102,10 +103,10 @@ async function main() {
     });
   });
 
-  const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX ?? "120", 10);
-  const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? "60000", 10);
+  const rateLimitMax = parseInt(envVar("RATE_LIMIT_MAX") ?? "120", 10);
+  const rateLimitWindowMs = parseInt(envVar("RATE_LIMIT_WINDOW_MS") ?? "60000", 10);
   const rateLimitEnabled =
-    process.env.RATE_LIMIT_ENABLED !== "false" &&
+    envVar("RATE_LIMIT_ENABLED") !== "false" &&
     Number.isFinite(rateLimitMax) &&
     rateLimitMax > 0;
 
