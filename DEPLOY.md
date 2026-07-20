@@ -77,6 +77,10 @@ Structured JSON via `pino`. Log per tool invocation:
 - `tool` (name)
 - `duration_ms`
 - `status` (`success` / error code)
+- `session_id`, `client_name`, `client_version` (from the MCP `initialize` handshake)
+- `ref` — install-source attribution, captured from `?ref=<source>` on the
+  connect URL (only links we control carry it; marketplace installs attribute
+  via `client_name`)
 - `query_length` / `path_length` / `bundle` (for the relevant tool)
 
 Aggregate at the platform level (Datadog, CloudWatch, etc.) and watch for:

@@ -11,6 +11,7 @@ import {
   ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "./config.js";
+import type { Attribution } from "./lib/attribution.js";
 import { logger } from "./lib/logger.js";
 import { asStructured } from "./lib/errors.js";
 import type { SqliteSearchClient } from "./search/sqlite.js";
@@ -48,12 +49,14 @@ export interface McpServerDeps {
   searchClient: SqliteSearchClient;
   bundleStore: BundleStore;
   resources: ResourceRegistry;
+  /** Per-session attribution (ENG-37100/37101); absent on stdio. */
+  attribution?: Attribution;
 }
 
 // Transport-agnostic MCP server wiring, shared by the Streamable HTTP entry
 // (server.ts) and the stdio entry (stdio.ts).
 export function buildMcpServer(deps: McpServerDeps): Server {
-  const { config, searchClient, bundleStore, resources } = deps;
+  const { config, searchClient, bundleStore, resources, attribution } = deps;
 
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -91,6 +94,15 @@ export function buildMcpServer(deps: McpServerDeps): Server {
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const start = Date.now();
     const { name, arguments: args } = req.params;
+    // Per-call attribution fields (ENG-37101): one queryable record per call.
+    const client = server.getClientVersion();
+    const callCtx = {
+      tool: name,
+      session_id: attribution?.sessionId?.(),
+      ref: attribution?.ref,
+      client_name: client?.name,
+      client_version: client?.version,
+    };
     try {
       let result: unknown;
       switch (name) {
@@ -115,7 +127,7 @@ export function buildMcpServer(deps: McpServerDeps): Server {
           throw new McpError(ErrorCode.InvalidParams, `Tool ${name} not found`);
       }
       logger.info(
-        { tool: name, duration_ms: Date.now() - start, status: "success" },
+        { ...callCtx, duration_ms: Date.now() - start, status: "success" },
         "tool_invocation",
       );
       return {
@@ -126,11 +138,11 @@ export function buildMcpServer(deps: McpServerDeps): Server {
       if (err instanceof McpError) throw err;
       const structured = asStructured(err);
       if (structured.code === "internal_error") {
-        logger.error({ tool: name, err }, "tool_invocation_failed");
+        logger.error({ ...callCtx, err }, "tool_invocation_failed");
       } else {
         logger.warn(
           {
-            tool: name,
+            ...callCtx,
             duration_ms: Date.now() - start,
             status: structured.code,
           },

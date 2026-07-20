@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig } from "./config.js";
 import { envVar } from "./lib/env.js";
+import { sanitizeRef } from "./lib/attribution.js";
 import { logger } from "./lib/logger.js";
 import { SqliteSearchClient } from "./search/sqlite.js";
 import { BundleStore } from "./bundles/loader.js";
@@ -31,12 +32,12 @@ async function main() {
   const allowedOrigins = parseList(envVar("ALLOWED_ORIGINS"));
   const dnsRebindingProtection = envVar("DNS_REBINDING_PROTECTION") !== "false";
 
-  async function createSessionTransport(): Promise<StreamableHTTPServerTransport> {
+  async function createSessionTransport(ref?: string): Promise<StreamableHTTPServerTransport> {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sid) => {
         transports.set(sid, transport);
-        logger.info({ sessionId: sid, sessions: transports.size }, "session_opened");
+        logger.info({ sessionId: sid, ref, sessions: transports.size }, "session_opened");
       },
       enableDnsRebindingProtection: dnsRebindingProtection,
       allowedHosts,
@@ -50,7 +51,13 @@ async function main() {
       }
     };
 
-    const server = buildMcpServer({ config, searchClient, bundleStore, resources });
+    const server = buildMcpServer({
+      config,
+      searchClient,
+      bundleStore,
+      resources,
+      attribution: { ref, sessionId: () => transport.sessionId },
+    });
     await server.connect(transport);
     return transport;
   }
@@ -133,7 +140,9 @@ async function main() {
         return;
       }
       try {
-        transport = await createSessionTransport();
+        // ENG-37100: links we control carry ?ref=<source> on the connect URL;
+        // captured once at initialize, tagged on every call in the session.
+        transport = await createSessionTransport(sanitizeRef(req.query.ref));
       } catch (err) {
         logger.error({ err }, "session_create_failed");
         sendJsonRpcError(res, 500, "Failed to initialize MCP session.");
