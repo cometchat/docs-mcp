@@ -15,7 +15,7 @@ const SWEEP_INTERVAL_MS = 60_000;
 
 export function rateLimit(opts: RateLimitOptions) {
   const { windowMs, max } = opts;
-  const keyFor = opts.keyFor ?? defaultKey;
+  const keyFor = opts.keyFor ?? clientIp;
   const buckets = new Map<string, Bucket>();
 
   const sweep = setInterval(() => {
@@ -53,11 +53,24 @@ export function rateLimit(opts: RateLimitOptions) {
   };
 }
 
-function defaultKey(req: Request): string {
+// Shared client-IP extraction, used by rate limiting AND analytics
+// fingerprinting/egress classification — the two must never diverge.
+//
+// We take the RIGHTMOST X-Forwarded-For hop: proxies APPEND to the header
+// (ALB default mode, nginx proxy_add_x_forwarded_for), so the last entry is
+// the address our own proxy observed on the socket — the only hop a client
+// cannot forge. The first hop is attacker-chosen whenever a client sends its
+// own XFF header, which would let anyone mint unlimited fingerprints, spoof
+// is_anthropic_egress, and rotate around per-IP rate limits.
+//
+// Assumes exactly one trusted proxy in front (ALB or nginx). Adding a CDN
+// layer makes the last hop the CDN's address — revisit this then.
+export function clientIp(req: Request): string {
   const fwd = req.header("x-forwarded-for");
   if (fwd) {
-    const first = fwd.split(",")[0]?.trim();
-    if (first) return first;
+    const hops = fwd.split(",");
+    const last = hops[hops.length - 1]?.trim();
+    if (last) return last;
   }
   return req.ip ?? req.socket.remoteAddress ?? "unknown";
 }

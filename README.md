@@ -231,6 +231,9 @@ docs-mcp/
 | `RATE_LIMIT_ENABLED` | `true` | Set `false` to disable per-IP rate limiting on `/mcp` |
 | `RATE_LIMIT_MAX` | `120` | Max requests per window per IP |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window in ms |
+| `POSTHOG_KEY` | _unset_ | PostHog project API key. Unset = usage analytics fully disabled (no-op) |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog instance host |
+| `ANALYTICS_SALT` | _unset_ | Required when `POSTHOG_KEY` is set (analytics stays off without it). Salts client fingerprints/IP hashes; rotating it resets all fingerprints |
 
 ---
 

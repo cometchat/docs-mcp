@@ -9,10 +9,27 @@ import { logger } from "./lib/logger.js";
 import { SqliteSearchClient } from "./search/sqlite.js";
 import { BundleStore } from "./bundles/loader.js";
 import { ResourceRegistry } from "./resources/registry.js";
-import { rateLimit } from "./lib/rateLimit.js";
+import { rateLimit, clientIp } from "./lib/rateLimit.js";
+import {
+  initAnalytics,
+  capture,
+  fingerprint,
+  ipHash,
+  isAnthropicEgress,
+  shutdownAnalytics,
+} from "./lib/analytics.js";
 import { buildMcpServer, SERVER_VERSION } from "./mcp.js";
 
 const SESSION_HEADER = "mcp-session-id";
+
+/** clientInfo + protocol version captured from the initialize request
+ *  (ENG-37102): a connector install that never calls a tool is exactly
+ *  `initialize` + `tools/list`, so session open must record who connected. */
+interface ClientMeta {
+  name?: string;
+  version?: string;
+  protocolVersion?: string;
+}
 
 async function main() {
   const config = loadConfig();
@@ -23,6 +40,11 @@ async function main() {
   const resources = await ResourceRegistry.load(config.skillsDir, bundleStore);
 
   const transports = new Map<string, StreamableHTTPServerTransport>();
+  // Set before the shutdown handler force-closes transports so session-ended
+  // events can be told apart from genuine client disconnects: sessions that
+  // were silently abandoned (network drop, no DELETE) only surface at the
+  // next deploy, with duration_ms inflated to the whole abandonment window.
+  let shuttingDown = false;
 
   const allowedHosts = parseList(envVar("ALLOWED_HOSTS")) ?? [
     `${config.host}:${config.port}`,
@@ -32,12 +54,37 @@ async function main() {
   const allowedOrigins = parseList(envVar("ALLOWED_ORIGINS"));
   const dnsRebindingProtection = envVar("DNS_REBINDING_PROTECTION") !== "false";
 
-  async function createSessionTransport(ref?: string): Promise<StreamableHTTPServerTransport> {
+  initAnalytics();
+
+  async function createSessionTransport(
+    ref?: string,
+    client?: ClientMeta,
+    ip?: string,
+  ): Promise<StreamableHTTPServerTransport> {
+    const distinctId = fingerprint(client?.name, client?.version, ip);
+    const sessionProps = {
+      ref,
+      client_name: client?.name,
+      client_version: client?.version,
+    };
+    let startedAt = 0;
+    let toolCalls = 0;
+
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sid) => {
         transports.set(sid, transport);
-        logger.info({ sessionId: sid, ref, sessions: transports.size }, "session_opened");
+        startedAt = Date.now();
+        logger.info(
+          { sessionId: sid, ...sessionProps, sessions: transports.size },
+          "session_opened",
+        );
+        capture(distinctId, "mcp_session_started", {
+          ...sessionProps,
+          protocol_version: client?.protocolVersion,
+          is_anthropic_egress: isAnthropicEgress(ip),
+          ip_hash: ipHash(ip),
+        });
       },
       enableDnsRebindingProtection: dnsRebindingProtection,
       allowedHosts,
@@ -48,6 +95,14 @@ async function main() {
       const sid = transport.sessionId;
       if (sid && transports.delete(sid)) {
         logger.info({ sessionId: sid, sessions: transports.size }, "session_closed");
+        if (startedAt > 0) {
+          capture(distinctId, "mcp_session_ended", {
+            ...sessionProps,
+            duration_ms: Date.now() - startedAt,
+            tool_calls_in_session: toolCalls,
+            ended_by: shuttingDown ? "server_shutdown" : "client",
+          });
+        }
       }
     };
 
@@ -57,6 +112,16 @@ async function main() {
       bundleStore,
       resources,
       attribution: { ref, sessionId: () => transport.sessionId },
+      telemetry: {
+        toolCall: (info) => {
+          toolCalls += 1;
+          capture(
+            distinctId,
+            info.status === "success" ? "mcp_tool_called" : "mcp_tool_failed",
+            { ...sessionProps, ...info },
+          );
+        },
+      },
     });
     await server.connect(transport);
     return transport;
@@ -142,7 +207,16 @@ async function main() {
       try {
         // ENG-37100: links we control carry ?ref=<source> on the connect URL;
         // captured once at initialize, tagged on every call in the session.
-        transport = await createSessionTransport(sanitizeRef(req.query.ref));
+        const params = (req.body as { params?: { protocolVersion?: unknown; clientInfo?: { name?: unknown; version?: unknown } } }).params;
+        transport = await createSessionTransport(
+          sanitizeRef(req.query.ref),
+          {
+            name: asString(params?.clientInfo?.name),
+            version: asString(params?.clientInfo?.version),
+            protocolVersion: asString(params?.protocolVersion),
+          },
+          clientIp(req),
+        );
       } catch (err) {
         logger.error({ err }, "session_create_failed");
         sendJsonRpcError(res, 500, "Failed to initialize MCP session.");
@@ -182,6 +256,7 @@ async function main() {
   });
 
   const shutdown = async (signal: string) => {
+    shuttingDown = true;
     logger.info({ signal, sessions: transports.size }, "server_shutdown");
     server.close();
     for (const t of transports.values()) {
@@ -192,11 +267,20 @@ async function main() {
       }
     }
     transports.clear();
+    // Flush the last analytics batch — skipping this loses the final
+    // flushInterval's worth of events on every deploy.
+    await shutdownAnalytics();
     searchClient.close();
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+}
+
+// Cap client-supplied strings before they flow into every log line and
+// analytics event — clientInfo is attacker-controlled and unbounded.
+function asString(v: unknown, maxLen = 200): string | undefined {
+  return typeof v === "string" && v.length > 0 ? v.slice(0, maxLen) : undefined;
 }
 
 function parseList(raw: string | undefined): string[] | undefined {

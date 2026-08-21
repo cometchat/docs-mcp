@@ -51,12 +51,26 @@ export interface McpServerDeps {
   resources: ResourceRegistry;
   /** Per-session attribution (ENG-37100/37101); absent on stdio. */
   attribution?: Attribution;
+  /** Per-call analytics hook (ENG-37102); absent on stdio. */
+  telemetry?: ToolCallTelemetry;
+}
+
+export interface ToolCallInfo {
+  tool: string;
+  status: string;
+  duration_ms: number;
+  bundle_id?: string;
+  error_code?: string;
+}
+
+export interface ToolCallTelemetry {
+  toolCall: (info: ToolCallInfo) => void;
 }
 
 // Transport-agnostic MCP server wiring, shared by the Streamable HTTP entry
 // (server.ts) and the stdio entry (stdio.ts).
 export function buildMcpServer(deps: McpServerDeps): Server {
-  const { config, searchClient, bundleStore, resources, attribution } = deps;
+  const { config, searchClient, bundleStore, resources, attribution, telemetry } = deps;
 
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -103,6 +117,10 @@ export function buildMcpServer(deps: McpServerDeps): Server {
       client_name: client?.name,
       client_version: client?.version,
     };
+    const bundleId =
+      name === BUNDLE_TOOL_NAME && typeof (args as { bundle?: unknown })?.bundle === "string"
+        ? (args as { bundle: string }).bundle.slice(0, 100)
+        : undefined;
     try {
       let result: unknown;
       switch (name) {
@@ -130,6 +148,12 @@ export function buildMcpServer(deps: McpServerDeps): Server {
         { ...callCtx, duration_ms: Date.now() - start, status: "success" },
         "tool_invocation",
       );
+      telemetry?.toolCall({
+        tool: name,
+        status: "success",
+        duration_ms: Date.now() - start,
+        bundle_id: bundleId,
+      });
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: result as Record<string, unknown>,
@@ -149,6 +173,13 @@ export function buildMcpServer(deps: McpServerDeps): Server {
           "tool_invocation_handled_error",
         );
       }
+      telemetry?.toolCall({
+        tool: name,
+        status: structured.code,
+        duration_ms: Date.now() - start,
+        bundle_id: bundleId,
+        error_code: structured.code,
+      });
       return errorResult(structured.message, structured.code);
     }
   });

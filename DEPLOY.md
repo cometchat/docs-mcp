@@ -83,6 +83,42 @@ Structured JSON via `pino`. Log per tool invocation:
   via `client_name`)
 - `query_length` / `path_length` / `bundle` (for the relevant tool)
 
+## Usage analytics (PostHog, ENG-37102)
+
+With `POSTHOG_KEY` + `ANALYTICS_SALT` set, the server emits four events tagged
+`source: "docs-mcp"`: `mcp_session_started` (at `initialize` — the only
+install signal MCP has; includes `client_name`/`client_version` from
+`clientInfo`, `protocol_version`, `ref`, `is_anthropic_egress`, `ip_hash`),
+`mcp_tool_called` / `mcp_tool_failed` (per call, with `tool`, `status`,
+`duration_ms`, `bundle_id`, `error_code`), and `mcp_session_ended`
+(`duration_ms`, `tool_calls_in_session`). `distinct_id` is a salted
+`mcp:`-namespaced fingerprint of `clientInfo` + client IP; person profiles are
+disabled; raw IPs and search-query text are never sent.
+
+- **Client split:** `client_name` distinguishes agents (claude-ai / Claude
+  Code / cursor / codex / …) — enumerate values from real traffic, don't
+  hardcode a match list. `is_anthropic_egress` (160.79.104.0/21) marks
+  claude.ai/Desktop/API traffic, whose shared egress IPs make per-client
+  dedupe impossible — report those as sessions.
+- **Client IP = rightmost X-Forwarded-For hop** (shared with the rate
+  limiter). Proxies append to XFF, so the last hop is the address our own
+  ALB/nginx saw — the only one a client can't forge. The first hop is
+  attacker-chosen and would allow minting unlimited fingerprints and spoofing
+  `is_anthropic_egress`. This assumes exactly ONE trusted proxy in front;
+  inserting a CDN makes the last hop the CDN's address — every client then
+  collapses into one fingerprint. Verify distinct fingerprints on real
+  traffic after any LB/CDN change.
+- `mcp_session_ended` carries `ended_by`: `client` (DELETE/disconnect) vs
+  `server_shutdown` (deploy flushed it). Abandoned sessions only surface at
+  the next deploy with inflated `duration_ms` — filter on `ended_by` when
+  analyzing session length.
+- Absent `POSTHOG_KEY`, everything is a no-op (local dev, stdio, tests).
+- Point at the dev PostHog project first; numbers only accrue once prod has
+  the key. Nothing is retroactive.
+- Weekly report: runnable HogQL in
+  [`scripts/analytics/weekly-report.sql`](./scripts/analytics/weekly-report.sql)
+  (headline table, client split, `ref` breakdown, top bundles).
+
 Aggregate at the platform level (Datadog, CloudWatch, etc.) and watch for:
 
 - p95 tool latency > 1.5 s.
