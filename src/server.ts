@@ -18,6 +18,7 @@ import {
   isAnthropicEgress,
   shutdownAnalytics,
 } from "./lib/analytics.js";
+import { IndexRefresher } from "./index/refresher.js";
 import { buildMcpServer, SERVER_VERSION } from "./mcp.js";
 
 const SESSION_HEADER = "mcp-session-id";
@@ -34,6 +35,24 @@ interface ClientMeta {
 async function main() {
   const config = loadConfig();
   const searchClient = new SqliteSearchClient(config.indexPath);
+
+  // In-container index refresh (opt-in). The baked image index is the boot
+  // floor: serving never waits on, or depends on, GitHub being reachable.
+  const refresher = config.indexAutoRefresh
+    ? new IndexRefresher({
+        searchClient,
+        repoUrl: config.docsRepoUrl,
+        ref: config.docsRef,
+        pinnedCommit: config.docsCommitPin,
+        workDir: config.indexWorkDir,
+        pollIntervalMs: config.indexPollIntervalMs,
+        keepGenerations: config.indexKeepGenerations,
+        policy: {
+          minPages: config.indexMinPages,
+          maxDropRatio: config.indexMaxDropRatio,
+        },
+      })
+    : null;
   const bundleStore = await BundleStore.load(config.bundlesDir, {
     strict: config.nodeEnv === "production",
   });
@@ -172,6 +191,7 @@ async function main() {
       indexAgeSeconds,
       bundles: bundleCount,
       sessions: transports.size,
+      ...(refresher ? { indexRefresh: refresher.snapshot() } : {}),
     });
   });
 
@@ -255,8 +275,11 @@ async function main() {
     );
   });
 
+  refresher?.start();
+
   const shutdown = async (signal: string) => {
     shuttingDown = true;
+    await refresher?.stop();
     logger.info({ signal, sessions: transports.size }, "server_shutdown");
     server.close();
     for (const t of transports.values()) {

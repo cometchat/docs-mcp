@@ -23,7 +23,17 @@ COPY --from=build /app/skills ./skills
 COPY --from=build /app/scripts ./scripts
 # Index is mounted at /app/data, built in the container before launch, or
 # baked in via Dockerfile.full (image-based deploys, e.g. ECS).
-RUN mkdir -p /app/data && chown node:node /app/data
+# git is required at RUNTIME for in-container index refresh (INDEX_AUTO_REFRESH):
+# the sparse, blobless clone fetches only mdx blobs (~44MB) — a codeload
+# tarball of the docs repo is ~390MB and cannot be filtered.
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends git ca-certificates >/dev/null \
+    && rm -rf /var/lib/apt/lists/*
+# /app/data/generations is the ECS volume mount point for in-container index
+# refresh. It must exist AND be owned by `node` in the image: a volume mounted
+# onto a path the image does not own comes up root-owned, and the non-root
+# runtime user cannot write to it.
+RUN mkdir -p /app/data/generations && chown -R node:node /app/data
 EXPOSE 3000
 USER node
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

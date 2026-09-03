@@ -231,6 +231,15 @@ docs-mcp/
 | `RATE_LIMIT_ENABLED` | `true` | Set `false` to disable per-IP rate limiting on `/mcp` |
 | `RATE_LIMIT_MAX` | `120` | Max requests per window per IP |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window in ms |
+| `INDEX_AUTO_REFRESH` | `false` | Set `true` to rebuild the search index in-container when `cometchat/docs` changes. Requires `git` in the image and a writable `INDEX_WORK_DIR`. |
+| `INDEX_POLL_INTERVAL_MS` | `600000` | How often to check the docs repo for a new commit (a `git ls-remote`, ~1s) |
+| `INDEX_WORK_DIR` | `./data/generations` | Where rebuilt index generations are written (tmpfs in production) |
+| `INDEX_KEEP_GENERATIONS` | `2` | Previous index generations retained on disk for instant fallback |
+| `INDEX_MIN_PAGES` | `2000` | Absolute floor: a candidate index with fewer pages is rejected |
+| `INDEX_MAX_DROP_RATIO` | `0.2` | Relative floor: reject a candidate losing more than this fraction of the served page count |
+| `DOCS_REPO_URL` | `https://github.com/cometchat/docs.git` | Public docs repo; cloned anonymously, no credentials |
+| `DOCS_REF` | `main` | Branch to follow |
+| `DOCS_COMMIT_PIN` | _unset_ | Freeze on one commit and stop following `HEAD` (incident escape hatch) |
 | `POSTHOG_KEY` | _unset_ | PostHog project API key. Unset = usage analytics fully disabled (no-op) |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog instance host |
 | `ANALYTICS_SALT` | _unset_ | Required when `POSTHOG_KEY` is set (analytics stays off without it). Salts client fingerprints/IP hashes; rotating it resets all fingerprints |

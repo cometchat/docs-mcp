@@ -48,7 +48,38 @@ export class SqliteSearchClient implements SearchClient {
   private prepared: Prepared | null = null;
   private warned = false;
 
-  constructor(private readonly indexPath: string) {}
+  constructor(private indexPath: string) {}
+
+  /** Path of the index currently being served. */
+  currentPath(): string {
+    return this.indexPath;
+  }
+
+  /**
+   * Point the client at a different index file (in-container hot refresh).
+   * Safe without draining: better-sqlite3 is synchronous, so a query either
+   * has completed or has not started — it can never be suspended mid-flight
+   * across the tick on which this runs.
+   */
+  swapTo(newPath: string): void {
+    const previous = this.prepared;
+    this.prepared = null;
+    this.indexPath = newPath;
+    this.warned = false;
+    previous?.db.close();
+  }
+
+  /** Row count of the served index; used to validate refresh candidates. */
+  pageCount(): number | null {
+    try {
+      const row = this.open().db.prepare("SELECT COUNT(*) AS n FROM pages").get() as
+        | { n: number }
+        | undefined;
+      return row?.n ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   isReady(): boolean {
     return this.prepared !== null || existsSync(this.indexPath);
@@ -130,6 +161,7 @@ export class SqliteSearchClient implements SearchClient {
     this.prepared?.db.close();
     this.prepared = null;
   }
+
 }
 
 function tokenizeForFts(raw: string): string[] {

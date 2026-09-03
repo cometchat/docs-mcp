@@ -83,6 +83,57 @@ Structured JSON via `pino`. Log per tool invocation:
   via `client_name`)
 - `query_length` / `path_length` / `bundle` (for the relevant tool)
 
+## In-container index refresh (self-healing)
+
+With `INDEX_AUTO_REFRESH=true` the server keeps its own search index current
+without a redeploy. Every `INDEX_POLL_INTERVAL_MS` (default 10 min) it runs a
+`git ls-remote` against the public docs repo (~1s, anonymous, no credentials).
+When `HEAD` moves it sparse-clones only the `.mdx` blobs (~44 MB, ~2s), rebuilds
+the index in a **child process** (~2s, ~245 MB peak, never blocking the event
+loop), validates it, and hot-swaps it in.
+
+**A bad index cannot reach traffic.** A candidate is rejected unless it clears
+all of:
+
+| Guard | Default | Catches |
+|---|---|---|
+| `INDEX_MIN_PAGES` | 2000 | empty or catastrophically broken build |
+| `INDEX_MAX_DROP_RATIO` | 0.2 | a docs merge that silently deletes a chunk of pages |
+| `journal_mode != wal` | — | a file that would fail on a read-only mount |
+| post-swap smoke queries | — | an index that validates but cannot answer |
+
+If the smoke queries fail *after* the swap, the server reverts to the previous
+generation immediately (an in-memory reference swap on a file already on disk —
+sub-second) and marks that commit poisoned so the poller stops retrying it. A
+later, healthy commit is accepted normally.
+
+**Three fallback tiers:** current generation → previous generation
+(`INDEX_KEEP_GENERATIONS`, on the work volume) → the index baked into the image, which is
+immutable and always present. The server therefore never depends on GitHub
+being reachable at boot.
+
+**Requirements:** `git` in the runtime image (already added), a writable
+`INDEX_WORK_DIR`, and ~1 GB task memory to cover the builder's peak. The work
+dir is the **only** writable path the task needs: the clone, the candidate
+index, and the build child's `TMPDIR`/`SQLITE_TMPDIR` all live under it, because
+`/tmp` is unwritable when the root filesystem is read-only (the `tsx` runner
+creates an IPC socket in the temp dir and fails otherwise). On Fargate
+that writable path is an **empty task volume** backed by ephemeral storage
+(`volumes: [{ name: index-work }]` + a `mountPoints` entry) — Fargate does not
+support the `tmpfs` container parameter, which is EC2-launch-type only. The
+volume is writable while `readonlyRootFilesystem: true` still applies to the
+rest of the filesystem, and it does not consume task memory.
+
+**Incident escape hatch:** set `DOCS_COMMIT_PIN=<good-sha>` to freeze on a known
+commit, or `INDEX_AUTO_REFRESH=false` to fall back to the baked index. Both
+take effect on the next deploy.
+
+`/health` reports `indexRefresh` with `docsCommit`, `builtAt`, retained
+`generations`, `poisoned` count, `lastCheckedAt` and `lastError` — so staleness
+and rejections are observable without reading logs. Log events:
+`index_refresh_started`, `index_refresh_succeeded`, `index_refresh_rejected`,
+`index_refresh_reverted`, `index_refresh_cycle_failed`.
+
 ## Usage analytics (PostHog, ENG-37102)
 
 With `POSTHOG_KEY` + `ANALYTICS_SALT` set, the server emits four events tagged

@@ -12,6 +12,22 @@ const ConfigSchema = z.object({
   searchTimeoutMs: z.coerce.number().int().positive().default(5000),
   logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
   nodeEnv: z.enum(["development", "production", "test"]).default("development"),
+  // In-container index refresh (opt-in: local dev and stdio are unaffected).
+  indexAutoRefresh: z
+    .string()
+    .optional()
+    .transform((v) => v === "true")
+    .pipe(z.boolean())
+    .default("false"),
+  indexPollIntervalMs: z.coerce.number().int().positive().default(600_000),
+  indexWorkDir: z.string().default("./data/generations"),
+  indexKeepGenerations: z.coerce.number().int().min(1).max(10).default(2),
+  indexMinPages: z.coerce.number().int().positive().default(2000),
+  indexMaxDropRatio: z.coerce.number().min(0).max(1).default(0.2),
+  docsRepoUrl: z.string().url().default("https://github.com/cometchat/docs.git"),
+  docsRef: z.string().default("main"),
+  /** Freeze on one commit; the poller stops following HEAD. */
+  docsCommitPin: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -28,5 +44,14 @@ export function loadConfig(): Config {
     searchTimeoutMs: env("SEARCH_TIMEOUT_MS"),
     logLevel: env("LOG_LEVEL"),
     nodeEnv: env("NODE_ENV"),
+    indexAutoRefresh: env("INDEX_AUTO_REFRESH"),
+    indexPollIntervalMs: env("INDEX_POLL_INTERVAL_MS"),
+    indexWorkDir: env("INDEX_WORK_DIR"),
+    indexKeepGenerations: env("INDEX_KEEP_GENERATIONS"),
+    indexMinPages: env("INDEX_MIN_PAGES"),
+    indexMaxDropRatio: env("INDEX_MAX_DROP_RATIO"),
+    docsRepoUrl: env("DOCS_REPO_URL"),
+    docsRef: env("DOCS_REF"),
+    docsCommitPin: env("DOCS_COMMIT_PIN"),
   });
 }

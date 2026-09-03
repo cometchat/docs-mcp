@@ -1,0 +1,44 @@
+#!/usr/bin/env sh
+# Pre-commit gate for cometchat-mcp.
+#
+# Enable once per clone:   npm run hooks:install
+# Bypass in an emergency:  git commit --no-verify   (or SKIP_HOOKS=1 git commit)
+#
+# Always runs type-check + unit tests (~3s). The end-to-end index-refresh
+# verification is slower, so it runs only when the staged changes can actually
+# affect that path — keeping unrelated commits fast while guaranteeing the
+# refresh/self-heal logic is never committed unproven.
+
+set -e
+
+if [ "${SKIP_HOOKS:-}" = "1" ]; then
+  echo "pre-commit: skipped (SKIP_HOOKS=1)"
+  exit 0
+fi
+
+# Run from the repo root regardless of where git invoked us.
+cd "$(git rev-parse --show-toplevel)"
+
+if [ ! -d node_modules ]; then
+  echo "pre-commit: node_modules missing — run 'npm ci' first" >&2
+  exit 1
+fi
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$STAGED" ] && exit 0
+
+echo "pre-commit: type-check"
+npm run --silent lint
+
+echo "pre-commit: unit tests"
+npm run --silent test
+
+# Paths whose behaviour the refresh verification actually covers.
+if printf '%s\n' "$STAGED" | grep -qE '^(src/index/|src/search/sqlite\.ts|src/config\.ts|src/server\.ts|scripts/build-index\.ts|scripts/verify-index-refresh\.ts)'; then
+  echo "pre-commit: index-refresh end-to-end verification (index path changed)"
+  npm run --silent verify:refresh
+else
+  echo "pre-commit: index-refresh verification skipped (no index-path changes staged)"
+fi
+
+echo "pre-commit: OK"
