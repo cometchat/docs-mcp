@@ -124,6 +124,15 @@ support the `tmpfs` container parameter, which is EC2-launch-type only. The
 volume is writable while `readonlyRootFilesystem: true` still applies to the
 rest of the filesystem, and it does not consume task memory.
 
+**Fargate mounts that volume root-owned**, and does *not* inherit the image
+directory's ownership the way a local Docker named volume does — so a
+container running as non-root (`node`) gets `EACCES` on first use, and the
+refresh never runs while `/health` still reports `ok`. The task definition
+therefore includes an `init-perms` container: the same image with `user: "0"`,
+which chowns the work dir to 1000:1000 and exits, with the app container
+gated on it via `dependsOn: SUCCESS`. Verified on staging 2026-09-04 —
+without it: `EACCES: permission denied, mkdtemp`; with it: refresh succeeds.
+
 **Incident escape hatch:** set `DOCS_COMMIT_PIN=<good-sha>` to freeze on a known
 commit, or `INDEX_AUTO_REFRESH=false` to fall back to the baked index. Both
 take effect on the next deploy.
