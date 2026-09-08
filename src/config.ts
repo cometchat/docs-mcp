@@ -28,6 +28,8 @@ const ConfigSchema = z.object({
   docsRef: z.string().default("main"),
   /** Freeze on one commit; the poller stops following HEAD. */
   docsCommitPin: z.string().optional(),
+  /** Unlocks the diagnostic fields on /health. Unset = never released. */
+  healthDetailToken: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -53,5 +55,6 @@ export function loadConfig(): Config {
     docsRepoUrl: env("DOCS_REPO_URL"),
     docsRef: env("DOCS_REF"),
     docsCommitPin: env("DOCS_COMMIT_PIN"),
+    healthDetailToken: env("HEALTH_DETAIL_TOKEN"),
   });
 }

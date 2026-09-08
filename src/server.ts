@@ -19,6 +19,7 @@ import {
   shutdownAnalytics,
 } from "./lib/analytics.js";
 import { IndexRefresher } from "./index/refresher.js";
+import { refreshView, wantsDetail } from "./lib/health.js";
 import { buildMcpServer, SERVER_VERSION } from "./mcp.js";
 
 const SESSION_HEADER = "mcp-session-id";
@@ -178,7 +179,7 @@ async function main() {
     });
   });
 
-  app.get("/health", (_req, res) => {
+  app.get("/health", (req, res) => {
     const indexReady = searchClient.isReady();
     const indexAgeSeconds = searchClient.indexAgeSeconds();
     const bundleCount = bundleStore.list().length;
@@ -191,7 +192,14 @@ async function main() {
       indexAgeSeconds,
       bundles: bundleCount,
       sessions: transports.size,
-      ...(refresher ? { indexRefresh: refresher.snapshot() } : {}),
+      ...(refresher
+        ? {
+            indexRefresh: refreshView(
+              refresher.snapshot(),
+              wantsDetail(req, config.healthDetailToken),
+            ),
+          }
+        : {}),
     });
   });
 

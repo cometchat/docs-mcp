@@ -137,9 +137,13 @@ without it: `EACCES: permission denied, mkdtemp`; with it: refresh succeeds.
 commit, or `INDEX_AUTO_REFRESH=false` to fall back to the baked index. Both
 take effect on the next deploy.
 
-`/health` reports `indexRefresh` with `docsCommit`, `builtAt`, retained
-`generations`, `poisoned` count, `lastCheckedAt` and `lastError` — so staleness
-and rejections are observable without reading logs. Log events:
+`/health` reports `indexRefresh` with `docsCommit`, `builtAt`, `lastCheckedAt`,
+retained `generations` and `lastRefreshOk`. The diagnostic fields — `lastError`
+(sanitized, but still carrying filesystem paths and errno codes) and `poisoned`
+— are withheld from the public payload and released only when a request carries
+`HEALTH_DETAIL_TOKEN`, via the `x-health-token` header (preferred; query strings
+end up in access logs) or `?detail=<token>`. Comparison is timing-safe and fails
+closed: with no token configured the detail is unreachable. Log events:
 `index_refresh_started`, `index_refresh_succeeded`, `index_refresh_rejected`,
 `index_refresh_reverted`, `index_refresh_cycle_failed`.
 
