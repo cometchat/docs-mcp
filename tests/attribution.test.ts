@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeRef } from "../src/lib/attribution.js";
+import { sanitizeRef, sanitizeSessionId } from "../src/lib/attribution.js";
 
 describe("sanitizeRef", () => {
   it("accepts simple minted sources", () => {
@@ -27,5 +27,39 @@ describe("sanitizeRef", () => {
     expect(sanitizeRef(".hidden")).toBeUndefined(); // must start alphanumeric
     expect(sanitizeRef("x".repeat(65))).toBeUndefined(); // 64-char cap
     expect(sanitizeRef("x".repeat(64))).toBe("x".repeat(64));
+  });
+});
+
+describe("sanitizeSessionId", () => {
+  const uuid = "3f2a1c9e-4b6d-4a2f-9c1e-7d5b8a0f2e41";
+
+  it("accepts a well-formed UUID", () => {
+    expect(sanitizeSessionId(uuid)).toBe(uuid);
+  });
+
+  it("normalises case so the same session is one grain", () => {
+    expect(sanitizeSessionId(uuid.toUpperCase())).toBe(uuid);
+  });
+
+  // The value is reflected in a response header and written into logs and
+  // PostHog properties, so anything not shaped like our own id is dropped.
+  it("rejects injection shapes and free text", () => {
+    for (const bad of [
+      "not-a-uuid",
+      "'; DROP TABLE events;--",
+      '<script>alert(1)</script>',
+      "3f2a1c9e-4b6d-4a2f-9c1e-7d5b8a0f2e41\r\nX-Injected: 1",
+      "../../etc/passwd",
+      "a".repeat(10_000),
+      "",
+    ]) {
+      expect(sanitizeSessionId(bad)).toBeUndefined();
+    }
+  });
+
+  it("rejects non-strings", () => {
+    expect(sanitizeSessionId(undefined)).toBeUndefined();
+    expect(sanitizeSessionId(["a", "b"])).toBeUndefined();
+    expect(sanitizeSessionId(42)).toBeUndefined();
   });
 });

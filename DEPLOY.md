@@ -59,16 +59,30 @@ The limiter reads the client IP from `X-Forwarded-For` (first hop) when present,
 
 ## Health
 
-- `GET /health` → `200 { status: "ok", indexReady: true, indexAgeSeconds: N, bundles: 10, sessions: N }` when the SQLite index exists and at least one bundle loaded.
+- `GET /health` → `200 { status: "ok", indexReady: true, indexAgeSeconds: N, bundles: 10 }` when the SQLite index exists and at least one bundle loaded. (There is no `sessions` count: the server is stateless — see "Sessions".)
 - `GET /health` → `503 { status: "degraded", indexReady: false, indexAgeSeconds: null, ... }` when the index is missing or the bundle store is empty. Use this for readiness gating: a container without an index should be marked not-ready so the load balancer doesn't route to it.
 - `indexAgeSeconds` is the file mtime of the SQLite index. The daily-rebuild cadence above means a healthy production should always be under ~26 hours (~94000s). Alert above that.
 
 ## Sessions
 
-The server is stateful per the MCP Streamable HTTP spec. Each client gets its own `mcp-session-id` allocated on `initialize`, kept alive across subsequent POST/GET/DELETE on `/mcp`. Sessions are in-memory and process-local, so:
+The server is **stateless**. Each POST is handled by a fresh transport and MCP
+`Server`; there is no session map and nothing is held between requests.
 
-- For multi-replica deploys, configure the load balancer with **session affinity on the `mcp-session-id` header** (or sticky cookies seeded from it). Otherwise round-robin will break sessions mid-handshake.
-- Rolling restarts terminate active sessions; the client (Claude) reconnects with a fresh `initialize`.
+`Mcp-Session-Id` is still issued at `initialize` and echoed by the client, but
+it is a **correlation label only** — no state hangs off it. That is what makes
+the server horizontally scalable:
+
+- **No load-balancer affinity is required.** Any replica serves any request.
+  Do not configure sticky sessions; they are unnecessary (and cookie-based
+  stickiness would not work anyway — MCP clients are `fetch`-based and do not
+  persist cookies).
+- **Rolling restarts no longer drop conversations**, because no conversation
+  state lives in a pod. A client's next request simply lands somewhere else.
+- The id is server-minted at `initialize` and validated as a UUID on echo; a
+  client-supplied value of any other shape is ignored.
+- `GET /mcp` returns **405** — the server declares `listChanged: false` on both
+  capabilities and sends no server-initiated messages, so there is no stream to
+  offer. `DELETE /mcp` returns **204** and is a no-op.
 
 ## Logging
 
@@ -77,7 +91,10 @@ Structured JSON via `pino`. Log per tool invocation:
 - `tool` (name)
 - `duration_ms`
 - `status` (`success` / error code)
-- `session_id`, `client_name`, `client_version` (from the MCP `initialize` handshake)
+- `session_id` — correlates the calls of one working session
+- `client_name`, `client_version` — **stdio only.** Over HTTP these appear on
+  the `session_opened` line, not on per-call lines (the `Server` handling a
+  tool call never saw `initialize`); correlate on `session_id`
 - `ref` — install-source attribution, captured from `?ref=<source>` on the
   connect URL (only links we control carry it; marketplace installs attribute
   via `client_name`)
@@ -150,14 +167,26 @@ closed: with no token configured the detail is unreachable. Log events:
 ## Usage analytics (PostHog, ENG-37102)
 
 With `POSTHOG_KEY` + `ANALYTICS_SALT` set, the server emits four events tagged
-`source: "docs-mcp"`: `mcp_session_started` (at `initialize` — the only
-install signal MCP has; includes `client_name`/`client_version` from
+`source: "docs-mcp"`: `mcp_session_started` (emitted once the transport has
+accepted the handshake, so rejected requests are not counted as installs; includes `client_name`/`client_version` from
 `clientInfo`, `protocol_version`, `ref`, `is_anthropic_egress`, `ip_hash`),
 `mcp_tool_called` / `mcp_tool_failed` (per call, with `tool`, `status`,
-`duration_ms`, `bundle_id`, `error_code`), and `mcp_session_ended`
-(`duration_ms`, `tool_calls_in_session`). `distinct_id` is a salted
-`mcp:`-namespaced fingerprint of `clientInfo` + client IP; person profiles are
-disabled; raw IPs and search-query text are never sent.
+`duration_ms`, `bundle_id`, `error_code`). `distinct_id` is a salted
+`mcp:`-namespaced fingerprint of the **client IP alone** — `clientInfo` exists
+only in the `initialize` body and cannot be reproduced per request, and hashing
+`client_version` made every client auto-update look like a new install. Person
+profiles are disabled; raw IPs and search-query text are never sent.
+
+There is **no `mcp_session_ended`**: with a stateless, multi-replica server no
+single process sees a session end. Session duration and per-session call counts
+are derived at query time instead (the last event *is* the end) — see
+`scripts/analytics/weekly-report.sql` §3b.
+
+**Per-call client identity is only available on stdio.** Over HTTP the
+`tool_invocation` log lines and `mcp_tool_called` events carry `session_id` and
+`ref` but not `client_name`/`client_version`, because the `Server` handling a
+tool call never saw `initialize`. Correlate on `session_id` with
+`session_opened` / `mcp_session_started` to attribute calls to a client.
 
 - **Client split:** `client_name` distinguishes agents (claude-ai / Claude
   Code / cursor / codex / …) — enumerate values from real traffic, don't
@@ -172,10 +201,9 @@ disabled; raw IPs and search-query text are never sent.
   inserting a CDN makes the last hop the CDN's address — every client then
   collapses into one fingerprint. Verify distinct fingerprints on real
   traffic after any LB/CDN change.
-- `mcp_session_ended` carries `ended_by`: `client` (DELETE/disconnect) vs
-  `server_shutdown` (deploy flushed it). Abandoned sessions only surface at
-  the next deploy with inflated `duration_ms` — filter on `ended_by` when
-  analyzing session length.
+- Session end is not an event. `DELETE /mcp` is a no-op and a stateless server
+  never observes an abandonment, so duration and per-session call counts are
+  derived at query time — the last event for a `session_id` is its end.
 - Absent `POSTHOG_KEY`, everything is a no-op (local dev, stdio, tests).
 - Point at the dev PostHog project first; numbers only accrue once prod has
   the key. Nothing is retroactive.

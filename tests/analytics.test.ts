@@ -52,30 +52,53 @@ describe("capture / shutdown without init", () => {
 
 describe("fingerprint", () => {
   it("is namespaced and fixed-length", () => {
-    const fp = fingerprint("claude-ai", "1.0", "1.2.3.4");
-    expect(fp).toMatch(/^mcp:[0-9a-f]{32}$/);
+    expect(fingerprint("1.2.3.4")).toMatch(/^mcp:[0-9a-f]{32}$/);
   });
 
-  it("is deterministic for identical inputs", () => {
-    expect(fingerprint("a", "b", "c")).toBe(fingerprint("a", "b", "c"));
+  it("is deterministic for the same client IP", () => {
+    expect(fingerprint("1.2.3.4")).toBe(fingerprint("1.2.3.4"));
   });
 
-  it("differs when any component changes", () => {
-    const base = fingerprint("claude-ai", "1.0", "1.2.3.4");
-    expect(fingerprint("cursor", "1.0", "1.2.3.4")).not.toBe(base);
-    expect(fingerprint("claude-ai", "2.0", "1.2.3.4")).not.toBe(base);
-    expect(fingerprint("claude-ai", "1.0", "5.6.7.8")).not.toBe(base);
+  it("differs per IP", () => {
+    expect(fingerprint("1.2.3.4")).not.toBe(fingerprint("5.6.7.8"));
+  });
+
+  // Stateless mode: clientInfo exists only in the initialize body, so the
+  // fingerprint takes exactly one argument and cannot vary with the client.
+  it("takes only an IP — arity is the guarantee it cannot depend on clientInfo", () => {
+    expect(fingerprint.length).toBe(1);
+  });
+
+  it("is unchanged by anything other than the IP", () => {
+    // Previously client_version was hashed in, so every auto-update produced a
+    // new id and inflated "new clients this week". Passing extra arguments must
+    // now have no effect at all.
+    const base = fingerprint("1.2.3.4");
+    const extra = (fingerprint as unknown as (...a: unknown[]) => string)(
+      "1.2.3.4", "claude-code", "9.9",
+    );
+    expect(extra).toBe(base);
+  });
+
+  it("treats a missing IP as its own stable bucket, not a crash", () => {
+    expect(fingerprint(undefined)).toMatch(/^mcp:[0-9a-f]{32}$/);
+    expect(fingerprint(undefined)).not.toBe(fingerprint("1.2.3.4"));
   });
 
   it("changes when the salt rotates", () => {
     process.env.ANALYTICS_SALT = "salt-one";
-    const one = fingerprint("a", "b", "c");
+    const one = fingerprint("1.2.3.4");
     process.env.ANALYTICS_SALT = "salt-two";
-    expect(fingerprint("a", "b", "c")).not.toBe(one);
+    expect(fingerprint("1.2.3.4")).not.toBe(one);
   });
 
-  it("does not embed inputs verbatim (hashed, not concatenated)", () => {
-    expect(fingerprint("claude-ai", "1.0", "1.2.3.4")).not.toContain("1.2.3.4");
+  it("does not embed the IP verbatim", () => {
+    expect(fingerprint("1.2.3.4")).not.toContain("1.2.3.4");
+  });
+
+  it("is domain-separated from ipHash (not the same digest)", () => {
+    process.env.ANALYTICS_SALT = "s";
+    expect(fingerprint("1.2.3.4")).not.toBe("mcp:" + ipHash("1.2.3.4"));
   });
 });
 
@@ -87,7 +110,7 @@ describe("ipHash", () => {
 
   it("hashes deterministically and differs from fingerprint", () => {
     expect(ipHash("1.2.3.4")).toBe(ipHash("1.2.3.4"));
-    expect(ipHash("1.2.3.4")).not.toBe(fingerprint(undefined, undefined, "1.2.3.4"));
+    expect(ipHash("1.2.3.4")).not.toBe(fingerprint("1.2.3.4"));
   });
 });
 

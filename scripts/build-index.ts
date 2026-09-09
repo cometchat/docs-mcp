@@ -11,7 +11,7 @@
  */
 import { readdir, readFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
-import matter from "gray-matter";
+import { parseFrontmatter } from "../src/lib/frontmatter.js";
 import Database from "better-sqlite3";
 
 const DOCS_REPO = process.env.DOCS_REPO ?? "../cometchat-docs-repo";
@@ -94,11 +94,18 @@ async function main() {
   console.error(`Indexing ${files.length} mdx files from ${DOCS_REPO}`);
 
   const rows: Row[] = [];
+  const unsafeFrontmatter: string[] = [];
   for (const abs of files) {
     const rel = path.relative(DOCS_REPO, abs);
     if (rel.startsWith("node_modules/") || rel.startsWith("snippets/")) continue;
     const raw = await readFile(abs, "utf8");
-    const parsed = matter(raw);
+    const parsed = parseFrontmatter(raw);
+    if (parsed.unsafeLanguage) {
+      // Docs come from a public repo and are rebuilt inside the serving
+      // container: skip the page, never evaluate it, and keep the build going.
+      unsafeFrontmatter.push(rel);
+      continue;
+    }
     const fm = parsed.data as Record<string, unknown>;
     const body = stripMdx(parsed.content);
     if (body.trim().length < 40) continue;
@@ -123,6 +130,14 @@ async function main() {
   // for readonly opens, which breaks read-only index mounts in production.
   db.pragma("journal_mode = DELETE");
   db.close();
+  if (unsafeFrontmatter.length > 0) {
+    // Loud on purpose: docs pages never legitimately use an executable
+    // frontmatter language, so this is either a mistake or an attack.
+    console.error(
+      `WARNING: skipped ${unsafeFrontmatter.length} page(s) with executable frontmatter: ` +
+        unsafeFrontmatter.slice(0, 10).join(", "),
+    );
+  }
   console.error(`Index built: ${total.n} pages → ${INDEX_PATH}`);
 }
 

@@ -22,3 +22,18 @@ export interface Attribution {
   ref?: string;
   sessionId?: () => string | undefined;
 }
+
+/**
+ * Accept an echoed MCP session id only in the shape the server mints (a UUID).
+ * Anything else is treated as absent.
+ *
+ * The value is reflected back in a response header and written into log lines
+ * and analytics properties, so unvalidated free text would be an injection
+ * sink and an unbounded field. The server always mints a fresh id at
+ * `initialize`; this guards the echo on subsequent requests.
+ */
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function sanitizeSessionId(raw: unknown): string | undefined {
+  return typeof raw === "string" && SESSION_ID_RE.test(raw) ? raw.toLowerCase() : undefined;
+}

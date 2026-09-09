@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import matter from "gray-matter";
+import { parseFrontmatter } from "../lib/frontmatter.js";
 import type { BundleStore } from "../bundles/loader.js";
 
 export const SKILL_URI = "cometchat://skills/overview";
@@ -31,7 +31,7 @@ export class ResourceRegistry {
   static async load(skillsDir: string, bundles: BundleStore): Promise<ResourceRegistry> {
     const skillPath = path.join(skillsDir, "overview.md");
     const raw = await readFile(skillPath, "utf8");
-    const parsed = matter(raw);
+    const parsed = parseFrontmatter(raw);
     const fm = parsed.data as { name?: string; description?: string };
     const description =
       typeof fm.description === "string" && fm.description.length > 0

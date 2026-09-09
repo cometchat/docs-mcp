@@ -287,8 +287,12 @@ export class IndexRefresher {
     // Child process: the build burns ~2s of CPU and must not block serving.
     await exec(TSX_BIN, [BUILD_SCRIPT], {
       timeout: this.opts.buildTimeoutMs ?? 600_000,
+      // ALLOWLIST, not `...process.env`: this child parses ~3k files fetched
+      // from a public repo, so it must never hold ANALYTICS_SALT, POSTHOG_KEY,
+      // HEALTH_DETAIL_TOKEN or any other server secret. Only what tsx/node and
+      // the builder actually need is forwarded.
       env: {
-        ...process.env,
+        ...pick(process.env, BUILD_ENV_ALLOWLIST),
         DOCS_REPO: cloneDir,
         INDEX_PATH: outPath,
         TMPDIR: tmp,
@@ -383,4 +387,31 @@ export function sanitizeError(err: unknown, repoUrl: string): string {
     .join("<docs-repo>")
     .replace(/https?:\/\/[^\s@]*@[^\s]+/g, "<redacted-url>");
   return redacted.slice(0, 300) || "index refresh failed";
+}
+
+/**
+ * The ONLY variables forwarded to the index-build child. Exported so a test
+ * can assert no secret ever creeps onto it.
+ */
+export const BUILD_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "NODE_ENV",
+  "NODE_OPTIONS",
+  "DOCS_BASE_URL",
+] as const;
+
+/** Copy only the named variables that are actually set. */
+function pick(
+  env: NodeJS.ProcessEnv,
+  keys: readonly string[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of keys) {
+    const v = env[k];
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
 }

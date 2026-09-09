@@ -109,6 +109,11 @@ export function buildMcpServer(deps: McpServerDeps): Server {
     const start = Date.now();
     const { name, arguments: args } = req.params;
     // Per-call attribution fields (ENG-37101): one queryable record per call.
+    // Populated by the SDK only on a Server that handled `initialize` — true
+    // for stdio (one long-lived Server) but NOT for stateless HTTP, where a
+    // fresh Server serves each request. On HTTP the per-call client is
+    // unknowable by construction; correlate via session_id with the
+    // `session_opened` line / `mcp_session_started` event instead.
     const client = server.getClientVersion();
     const callCtx = {
       tool: name,

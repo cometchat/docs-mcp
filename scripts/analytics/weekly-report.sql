@@ -1,6 +1,11 @@
 -- Weekly MCP usage report (ENG-37102) — HogQL, paste into PostHog → SQL.
--- All events are tagged source = 'docs-mcp'; distinct_id is the salted
--- 'mcp:' fingerprint (clientInfo + client IP).
+-- All events are tagged source = 'docs-mcp'. distinct_id is the salted 'mcp:'
+-- fingerprint of the client IP alone (clientInfo is only present in the
+-- initialize body and cannot be reproduced per request). Consequences:
+--   - two clients behind one NAT/office IP share a distinct_id;
+--   - client_name/client_version live on mcp_session_started only, so any
+--     per-client breakdown must group by session_id and pull the client with
+--     any(properties.client_name) — see §3b.
 --
 -- Definitions (from the tracking brief):
 --   install       = an initialize (mcp_session_started). The only signal MCP has.
@@ -74,6 +79,30 @@ FROM events
 WHERE event = 'mcp_session_started' AND properties.source = 'docs-mcp'
 GROUP BY week, ref
 ORDER BY week DESC, sessions DESC;
+
+-- ── 3b. Per-session behaviour — "did this Claude Code session get what it
+--        came for?" Session duration and call counts are derived here rather
+--        than emitted by the server: with a stateless, multi-replica server a
+--        session's calls land on different pods, so no single process can
+--        count them. The last event IS the session end.
+SELECT
+    properties.session_id                                    AS session_id,
+    any(properties.client_name)                              AS client,
+    any(properties.ref)                                      AS ref,
+    countIf(event = 'mcp_tool_called')                       AS successful_calls,
+    countIf(event = 'mcp_tool_failed')                       AS failed_calls,
+    dateDiff('second', min(timestamp), max(timestamp))       AS session_seconds,
+    groupUniqArray(properties.tool)                          AS tools_used,
+    -- "got the desired output": at least one successful call and no failures
+    countIf(event = 'mcp_tool_called') > 0
+      AND countIf(event = 'mcp_tool_failed') = 0             AS clean_session
+FROM events
+WHERE properties.source = 'docs-mcp'
+  AND properties.session_id IS NOT NULL
+  AND timestamp > now() - INTERVAL 7 DAY
+GROUP BY session_id
+ORDER BY successful_calls DESC
+LIMIT 100;
 
 -- ── 4. Top implementation bundles (incl. misses = missing scenarios) ───────
 SELECT

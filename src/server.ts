@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig } from "./config.js";
 import { envVar } from "./lib/env.js";
-import { sanitizeRef } from "./lib/attribution.js";
+import { sanitizeRef, sanitizeSessionId } from "./lib/attribution.js";
 import { logger } from "./lib/logger.js";
 import { SqliteSearchClient } from "./search/sqlite.js";
 import { BundleStore } from "./bundles/loader.js";
@@ -59,12 +59,6 @@ async function main() {
   });
   const resources = await ResourceRegistry.load(config.skillsDir, bundleStore);
 
-  const transports = new Map<string, StreamableHTTPServerTransport>();
-  // Set before the shutdown handler force-closes transports so session-ended
-  // events can be told apart from genuine client disconnects: sessions that
-  // were silently abandoned (network drop, no DELETE) only surface at the
-  // next deploy, with duration_ms inflated to the whole abandonment window.
-  let shuttingDown = false;
 
   const allowedHosts = parseList(envVar("ALLOWED_HOSTS")) ?? [
     `${config.host}:${config.port}`,
@@ -75,77 +69,6 @@ async function main() {
   const dnsRebindingProtection = envVar("DNS_REBINDING_PROTECTION") !== "false";
 
   initAnalytics();
-
-  async function createSessionTransport(
-    ref?: string,
-    client?: ClientMeta,
-    ip?: string,
-  ): Promise<StreamableHTTPServerTransport> {
-    const distinctId = fingerprint(client?.name, client?.version, ip);
-    const sessionProps = {
-      ref,
-      client_name: client?.name,
-      client_version: client?.version,
-    };
-    let startedAt = 0;
-    let toolCalls = 0;
-
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (sid) => {
-        transports.set(sid, transport);
-        startedAt = Date.now();
-        logger.info(
-          { sessionId: sid, ...sessionProps, sessions: transports.size },
-          "session_opened",
-        );
-        capture(distinctId, "mcp_session_started", {
-          ...sessionProps,
-          protocol_version: client?.protocolVersion,
-          is_anthropic_egress: isAnthropicEgress(ip),
-          ip_hash: ipHash(ip),
-        });
-      },
-      enableDnsRebindingProtection: dnsRebindingProtection,
-      allowedHosts,
-      ...(allowedOrigins ? { allowedOrigins } : {}),
-    });
-
-    transport.onclose = () => {
-      const sid = transport.sessionId;
-      if (sid && transports.delete(sid)) {
-        logger.info({ sessionId: sid, sessions: transports.size }, "session_closed");
-        if (startedAt > 0) {
-          capture(distinctId, "mcp_session_ended", {
-            ...sessionProps,
-            duration_ms: Date.now() - startedAt,
-            tool_calls_in_session: toolCalls,
-            ended_by: shuttingDown ? "server_shutdown" : "client",
-          });
-        }
-      }
-    };
-
-    const server = buildMcpServer({
-      config,
-      searchClient,
-      bundleStore,
-      resources,
-      attribution: { ref, sessionId: () => transport.sessionId },
-      telemetry: {
-        toolCall: (info) => {
-          toolCalls += 1;
-          capture(
-            distinctId,
-            info.status === "success" ? "mcp_tool_called" : "mcp_tool_failed",
-            { ...sessionProps, ...info },
-          );
-        },
-      },
-    });
-    await server.connect(transport);
-    return transport;
-  }
 
   const app = express();
   app.use(express.json({ limit: "4mb" }));
@@ -191,7 +114,6 @@ async function main() {
       indexReady,
       indexAgeSeconds,
       bundles: bundleCount,
-      sessions: transports.size,
       ...(refresher
         ? {
             indexRefresh: refreshView(
@@ -219,54 +141,124 @@ async function main() {
     );
   }
 
+  /**
+   * STATELESS transport: a fresh transport + server per request, no session
+   * map, so ANY replica can serve ANY request.
+   *
+   * The `Mcp-Session-Id` header is still issued on initialize and echoed by
+   * the client, but it is a CORRELATION LABEL only — no state hangs off it,
+   * which is what removes the load-balancer affinity requirement. A request
+   * arriving without one is served normally, just unattributed.
+   */
   app.post("/mcp", async (req, res) => {
-    const sessionId = req.header(SESSION_HEADER);
-    let transport = sessionId ? transports.get(sessionId) : undefined;
+    const body = req.body as {
+      method?: string;
+      params?: { protocolVersion?: unknown; clientInfo?: { name?: unknown; version?: unknown } };
+    };
+    const isInit = isInitializeRequest(req.body);
+    // The SERVER owns session identity. On initialize we always mint a fresh
+    // id — honouring a client-supplied one there would let a client pin a
+    // single id forever, collapsing unrelated working sessions into one row in
+    // the analytics. On later requests we accept the echoed id, but only if it
+    // is well-formed: it is reflected in a response header and recorded in log
+    // lines and PostHog, so an unvalidated value is an injection sink.
+    const sessionId = isInit ? randomUUID() : sanitizeSessionId(req.header(SESSION_HEADER));
 
-    if (!transport) {
-      if (sessionId) {
-        sendJsonRpcError(res, 400, "Unknown or expired session ID.");
-        return;
-      }
-      if (!isInitializeRequest(req.body)) {
-        sendJsonRpcError(res, 400, "First request on a new session must be 'initialize'.");
-        return;
-      }
-      try {
-        // ENG-37100: links we control carry ?ref=<source> on the connect URL;
-        // captured once at initialize, tagged on every call in the session.
-        const params = (req.body as { params?: { protocolVersion?: unknown; clientInfo?: { name?: unknown; version?: unknown } } }).params;
-        transport = await createSessionTransport(
-          sanitizeRef(req.query.ref),
-          {
-            name: asString(params?.clientInfo?.name),
-            version: asString(params?.clientInfo?.version),
-            protocolVersion: asString(params?.protocolVersion),
-          },
-          clientIp(req),
+    const ip = clientIp(req);
+    // ENG-37100: links we control carry ?ref=<source>. Clients send their
+    // configured URL on every request, so this is present throughout.
+    const ref = sanitizeRef(req.query.ref);
+    const distinctId = fingerprint(ip);
+
+    if (isInit) {
+      const client: ClientMeta = {
+        name: asString(body.params?.clientInfo?.name),
+        version: asString(body.params?.clientInfo?.version),
+        protocolVersion: asString(body.params?.protocolVersion),
+      };
+      // Record the install only once the transport has ACCEPTED the handshake.
+      // Emitting here unconditionally would count requests the SDK rejects
+      // (406 on a bad Accept, 415 on wrong Content-Type, 403 from the
+      // DNS-rebinding guard) as installs, inflating the headline metric.
+      res.on("finish", () => {
+        if (res.statusCode >= 400) return;
+        logger.info(
+          { sessionId, ref, client_name: client.name, client_version: client.version },
+          "session_opened",
         );
-      } catch (err) {
-        logger.error({ err }, "session_create_failed");
-        sendJsonRpcError(res, 500, "Failed to initialize MCP session.");
-        return;
-      }
+        capture(distinctId, "mcp_session_started", {
+          ref,
+          client_name: client.name,
+          client_version: client.version,
+          protocol_version: client.protocolVersion,
+          is_anthropic_egress: isAnthropicEgress(ip),
+          ip_hash: ipHash(ip),
+          session_id: sessionId,
+        });
+      });
     }
 
-    await transport.handleRequest(req, res, req.body);
+    if (sessionId) res.setHeader(SESSION_HEADER, sessionId);
+    // NB: the SDK still sees the incoming header (it re-reads the raw request
+    // via @hono/node-server), but in stateless mode validateSession() returns
+    // early without checking it, so an id the SDK never issued is ignored
+    // rather than rejected. Nothing to strip.
+
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableDnsRebindingProtection: dnsRebindingProtection,
+      allowedHosts,
+      ...(allowedOrigins ? { allowedOrigins } : {}),
+    });
+    const mcpServer = buildMcpServer({
+      config,
+      searchClient,
+      bundleStore,
+      resources,
+      attribution: { ref, sessionId: () => sessionId },
+      telemetry: {
+        toolCall: (info) => {
+          capture(
+            distinctId,
+            info.status === "success" ? "mcp_tool_called" : "mcp_tool_failed",
+            { ref, session_id: sessionId, ...info },
+          );
+        },
+      },
+    });
+
+    res.on("close", () => {
+      void transport.close();
+      void mcpServer.close();
+    });
+
+    try {
+      await mcpServer.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (err) {
+      logger.error({ err }, "mcp_request_failed");
+      if (!res.headersSent) sendJsonRpcError(res, 500, "Internal error handling MCP request.");
+    }
   });
 
-  const handleSessionRequest = async (req: Request, res: Response) => {
-    const sessionId = req.header(SESSION_HEADER);
-    const transport = sessionId ? transports.get(sessionId) : undefined;
-    if (!transport) {
-      res.status(400).send("Invalid or missing session ID");
-      return;
-    }
-    await transport.handleRequest(req, res);
-  };
+  // No server->client stream exists (both capabilities declare
+  // listChanged:false), so there is nothing to stream. 405 is the
+  // spec-sanctioned response for a server that does not offer GET.
+  app.get("/mcp", (_req, res) => {
+    res.status(405).set("Allow", "POST, DELETE").json({
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "This server does not offer an SSE stream." },
+      id: null,
+    });
+  });
 
-  app.get("/mcp", handleSessionRequest);
-  app.delete("/mcp", handleSessionRequest);
+  // Nothing is held server-side, so termination is a no-op the client may
+  // still politely announce.
+  app.delete("/mcp", (req, res) => {
+    const sessionId = req.header(SESSION_HEADER);
+    if (sessionId) logger.info({ sessionId }, "session_closed");
+    res.status(204).end();
+  });
 
   const server = app.listen(config.port, config.host, () => {
     logger.info(
@@ -286,18 +278,9 @@ async function main() {
   refresher?.start();
 
   const shutdown = async (signal: string) => {
-    shuttingDown = true;
     await refresher?.stop();
-    logger.info({ signal, sessions: transports.size }, "server_shutdown");
+    logger.info({ signal }, "server_shutdown");
     server.close();
-    for (const t of transports.values()) {
-      try {
-        await t.close();
-      } catch (err) {
-        logger.warn({ err }, "transport_close_failed");
-      }
-    }
-    transports.clear();
     // Flush the last analytics batch — skipping this loses the final
     // flushInterval's worth of events on every deploy.
     await shutdownAnalytics();

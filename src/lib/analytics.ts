@@ -37,10 +37,23 @@ export function initAnalytics(): boolean {
   return true;
 }
 
-/** Stable per-client id: salted hash of clientInfo + ip, namespaced so it can
- *  never collide with real CometChat distinct_ids. */
-export function fingerprint(name?: string, version?: string, ip?: string): string {
-  return "mcp:" + saltedHash(`${name ?? ""}|${version ?? ""}|${ip ?? ""}`);
+/**
+ * Stable per-installation id, namespaced so it can never collide with real
+ * CometChat distinct_ids.
+ *
+ * Derived from the client IP ALONE, deliberately:
+ *   - it must be reproducible on every request, and `clientInfo` is only
+ *     present in the `initialize` body — later requests cannot rebuild it;
+ *   - including `client_version` made every client auto-update look like a
+ *     brand-new install, inflating "new clients this week" with upgrades.
+ *
+ * `client_name`/`client_version` are still recorded as event properties on
+ * `mcp_session_started`, and `session_id` groups a working session, so both
+ * questions stay answerable at query time.
+ */
+export function fingerprint(ip?: string): string {
+  // Domain-separated from ipHash so the two are not the same digest.
+  return "mcp:" + saltedHash(`client|${ip ?? ""}`);
 }
 
 /** Salted hash of the ip alone (NAT/VPN analysis). Never store raw IPs. */

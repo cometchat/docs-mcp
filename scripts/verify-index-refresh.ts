@@ -11,10 +11,12 @@
  *   2. a regressed commit (most pages deleted) is REJECTED and the good index
  *      keeps serving
  *   3. a rejected commit is remembered, so the poller does not rebuild it
+ *   4. a docs page with executable (`---js`) frontmatter cannot run code or
+ *      leak the server's environment during the in-container rebuild
  *
  * Usage: npx tsx scripts/verify-index-refresh.ts
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -303,6 +305,72 @@ async function main() {
 
     await failRefresher.stop();
     failClient.close();
+  }
+
+  // --- hostile docs commit: executable frontmatter -------------------------
+  // The rebuild runs as a CHILD OF THE LIVE SERVING CONTAINER with the
+  // server's environment, so a page that can execute code during the build is
+  // remote code execution plus secret exfiltration. gray-matter picks its
+  // parser from the tag in the file and its `javascript` engine is `eval`.
+  {
+    console.log("\nverify-index-refresh: hostile docs commit (executable frontmatter)");
+    const canary = `CANARY-${Math.random().toString(36).slice(2)}`;
+    const hostileRepo = path.join(root, "docs-hostile");
+    mkdirSync(hostileRepo, { recursive: true });
+    git(["init", "-q", "-b", "main"], hostileRepo);
+    for (let i = 0; i < 12; i++) {
+      writeFileSync(path.join(hostileRepo, `ok-${i}.mdx`), page(`Ok ${i}`, `benign chat content ${i}`));
+    }
+    // Exfiltrates an env var to stdout — the same primitive that would leak
+    // ANALYTICS_SALT / POSTHOG_KEY / HEALTH_DETAIL_TOKEN in production.
+    writeFileSync(
+      path.join(hostileRepo, "evil.mdx"),
+      '---js\n{ title: (globalThis.process.stdout.write("PWNED:" + globalThis.process.env.SECRET_CANARY + "\\n"), "Innocent Page") }\n---\n\n' +
+        "# Innocent Page\n\nzzmarkerzz this body is unique to the hostile page and must never be indexed.\n",
+    );
+    git(["add", "-A"], hostileRepo);
+    git(
+      ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "hostile"],
+      hostileRepo,
+    );
+
+    const hostileOut = path.join(root, "hostile.sqlite");
+    // spawnSync, not execFileSync: the builder logs to stderr and execFileSync
+    // returns stdout only, which would silently pass the "was it reported"
+    // check no matter what the builder printed.
+    const built = spawnSync("npx", ["tsx", "scripts/build-index.ts"], {
+      env: { ...process.env, DOCS_REPO: hostileRepo, INDEX_PATH: hostileOut, SECRET_CANARY: canary },
+      encoding: "utf8",
+    });
+    const combined = (built.stdout ?? "") + (built.stderr ?? "");
+    const buildFailed = built.status !== 0;
+
+    await check("executable frontmatter does NOT run during the index build", () => {
+      assert.ok(!combined.includes("PWNED"), "frontmatter code executed during the build");
+      assert.ok(!combined.includes(canary), "the build leaked an environment variable");
+    });
+
+    await check("the hostile page is skipped, not indexed", async () => {
+      assert.equal(buildFailed, false, "one bad page must not abort the whole build");
+      const c = new SqliteSearchClient(hostileOut);
+      const hits = await c.search("zzmarkerzz", { limit: 5 });
+      c.close();
+      assert.equal(hits.results.length, 0, "hostile page must not appear in the index");
+    });
+
+    await check("the rest of the commit still indexes (build is not derailed)", async () => {
+      const c = new SqliteSearchClient(hostileOut);
+      const hits = await c.search("benign", { limit: 20 });
+      c.close();
+      assert.ok(hits.results.length > 0, "benign pages should still be indexed");
+    });
+
+    await check("the skip is reported loudly, not silently swallowed", () => {
+      assert.ok(
+        /executable frontmatter/i.test(combined),
+        "expected a warning naming the skipped page",
+      );
+    });
   }
 
   await refresher.stop();

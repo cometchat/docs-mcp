@@ -34,7 +34,7 @@ echo "pre-commit: unit tests"
 npm run --silent test
 
 # Paths whose behaviour the refresh verification actually covers.
-if printf '%s\n' "$STAGED" | grep -qE '^(src/index/|src/search/sqlite\.ts|src/config\.ts|src/server\.ts|scripts/build-index\.ts|scripts/verify-index-refresh\.ts)'; then
+if printf '%s\n' "$STAGED" | grep -qE '^(src/index/|src/search/sqlite\.ts|src/config\.ts|src/server\.ts|src/lib/frontmatter\.ts|scripts/build-index\.ts|scripts/verify-index-refresh\.ts)'; then
   echo "pre-commit: index-refresh end-to-end verification (index path changed)"
   npm run --silent verify:refresh
 else

@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import matter from "gray-matter";
+import { parseFrontmatter } from "../lib/frontmatter.js";
 import { logger } from "../lib/logger.js";
 import { BUNDLE_MAX_BYTES, byteLength } from "../lib/truncate.js";
 import type { Bundle, BundleFrontmatter } from "./types.js";
@@ -21,7 +21,14 @@ export class BundleStore {
       const filePath = path.join(dir, entry.name);
       try {
         const raw = await readFile(filePath, "utf8");
-        const parsed = matter(raw);
+        const parsed = parseFrontmatter(raw);
+        if (parsed.unsafeLanguage) {
+          // Image-baked content: an executable frontmatter tag here means the
+          // bundle was tampered with, so fail loudly rather than serve it.
+          throw new Error(
+            `bundle ${name} uses unsupported '${parsed.unsafeLanguage}' frontmatter`,
+          );
+        }
         const fm = parsed.data as Partial<BundleFrontmatter>;
         validateFrontmatter(name, fm);
         const content = parsed.content.trimStart();
