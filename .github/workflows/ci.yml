@@ -85,3 +85,134 @@ jobs:
           name: search-index
           path: cometchat-mcp/data/index.sqlite
           retention-days: 7
+
+  # Builds the image the way the deploy pipelines do and asserts the contract
+  # the Dockerfile promises. Nothing else here builds the image, so image-level
+  # breaks (a call site hitting the wrong stage, a directory the runtime image
+  # forgot to ship) otherwise surface only at deploy time.
+  docker-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        # Naming bash explicitly is what enables pipefail. The implicit default
+        # is `bash -e`, under which `docker buildx build ... | tee` would hide a
+        # failed build behind tee's exit status.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v4
+
+      # `docker buildx build` in a run step cannot reach the Actions cache on
+      # its own. Export only the variables its gha cache backend reads.
+      - name: Expose the Actions cache to buildx
+        uses: actions/github-script@v9
+        with:
+          script: |
+            for (const k of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL', 'ACTIONS_CACHE_URL', 'ACTIONS_CACHE_SERVICE_V2']) {
+              if (process.env[k]) core.exportVariable(k, process.env[k]);
+            }
+
+      - name: Resolve docs HEAD
+        run: |
+          sha=$(git ls-remote https://github.com/cometchat/docs.git HEAD | cut -f1) || true
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::could not resolve cometchat/docs HEAD (got '$sha')"; exit 1
+          fi
+          echo "DOCS_SHA=$sha" >> "$GITHUB_ENV"
+
+      - name: Runtime target builds without touching the docs repo
+        run: |
+          docker buildx build --progress=plain --target runtime --load -t mcp:runtime \
+            --cache-from type=gha,scope=docker-image,timeout=3m \
+            --cache-to type=gha,scope=docker-image,mode=max,ignore-error=true,timeout=3m \
+            . 2>&1 | tee runtime.log
+          if grep -qE 'baking index|git clone' runtime.log; then
+            echo "::error::--target runtime touched the docs repo; it must stay hermetic"; exit 1
+          fi
+
+      - name: Bare build fails on the DOCS_COMMIT guard
+        run: |
+          if docker buildx build --progress=plain . > bare.log 2>&1; then
+            echo "::error::a bare 'docker build .' succeeded; it must fail on the DOCS_COMMIT guard"; exit 1
+          fi
+          # Match output lines ("#<step> <secs> ..."), not the echoed RUN command,
+          # which carries the same text whether or not it ran.
+          if ! grep -qE '^#[0-9]+ [0-9.]+ ERROR: --build-arg DOCS_COMMIT=<sha> is required' bare.log; then
+            echo "::error::the bare build failed, but not on the DOCS_COMMIT guard"
+            tail -n 40 bare.log; exit 1
+          fi
+          if grep -qE '^#[0-9]+ [0-9.]+ (baking index|Cloning into)' bare.log; then
+            echo "::error::the DOCS_COMMIT guard printed its error but did not stop the build"; exit 1
+          fi
+
+      - name: Full target bakes the index pinned to docs HEAD
+        run: |
+          docker buildx build --progress=plain --target full --load -t mcp:full \
+            --build-arg DOCS_COMMIT="$DOCS_SHA" \
+            --cache-from type=gha,scope=docker-image,timeout=3m \
+            --cache-to type=gha,scope=docker-image,mode=max,ignore-error=true,timeout=3m \
+            .
+
+      - name: Full image carries its provenance and a usable index, and serves
+        run: |
+          label=$(docker inspect -f '{{ index .Config.Labels "com.cometchat.docs-commit" }}' mcp:full)
+          if [ "$label" != "$DOCS_SHA" ]; then
+            echo "::error::docs-commit label is '$label', expected $DOCS_SHA"; exit 1
+          fi
+          owner=$(docker run --rm --pull never --entrypoint stat mcp:full -c '%U' /app/data/index.sqlite) \
+            || { echo "::error::/app/data/index.sqlite is missing from the full image"; exit 1; }
+          if [ "$owner" != node ]; then
+            echo "::error::/app/data/index.sqlite is owned by '$owner', expected node"; exit 1
+          fi
+          # /health only proves the index file exists, so look inside it. The
+          # floor matches the refresher's default INDEX_MIN_PAGES.
+          pages=$(docker run --rm --pull never --entrypoint node mcp:full -e '
+            const db = new (require("better-sqlite3"))("/app/data/index.sqlite", { readonly: true });
+            const n = db.prepare("SELECT COUNT(*) AS n FROM pages").get().n;
+            const hit = db.prepare("SELECT 1 FROM pages_fts WHERE pages_fts MATCH ? LIMIT 1").get("message");
+            console.log(hit ? n : 0);') \
+            || { echo "::error::could not read the baked index"; exit 1; }
+          if [ "$pages" -lt 2000 ]; then
+            echo "::error::baked index has $pages searchable pages; expected at least 2000"; exit 1
+          fi
+          docker run -d --pull never --name mcp-full -p 127.0.0.1:38080:3000 -e NODE_ENV=production mcp:full
+          curl -sf --retry 30 --retry-connrefused --retry-all-errors --retry-delay 2 http://127.0.0.1:38080/health \
+            || { echo "::error::/health never returned 200"; exit 1; }
+
+      # The path that broke silently: the runtime image rebuilding its own index
+      # in-container, on a read-only root filesystem as on Fargate.
+      - name: Runtime image refreshes its own index on a read-only root fs
+        run: |
+          # A 15s poll lets the refresher retry a transient clone error itself; a
+          # deterministic failure still ends in commit_abandoned after 3 attempts.
+          docker run -d --pull never --name mcp-refresh --read-only -p 127.0.0.1:38081:3000 \
+            -v mcp-generations:/app/data/generations \
+            -e NODE_ENV=production -e INDEX_AUTO_REFRESH=true \
+            -e INDEX_WORK_DIR=/app/data/generations -e INDEX_POLL_INTERVAL_MS=15000 \
+            mcp:runtime
+          outcome=
+          for _ in $(seq 1 150); do
+            logs=$(docker logs mcp-refresh 2>&1)
+            if grep -q '"msg":"index_refresh_succeeded"' <<<"$logs"; then outcome=ok; break; fi
+            if grep -qE '"msg":"index_refresh_(rejected|reverted|commit_abandoned|ref_unresolved)"' <<<"$logs"; then outcome=failed; break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' mcp-refresh)" != true ]; then outcome=exited; break; fi
+            sleep 2
+          done
+          grep index_refresh <<<"$logs" || true
+          if [ "$outcome" != ok ]; then
+            echo "::error::in-container index refresh did not succeed (${outcome:-timed out after 5 min})"; exit 1
+          fi
+          curl -sf http://127.0.0.1:38081/health \
+            || { echo "::error::refresh succeeded but /health is not 200"; exit 1; }
+
+      - name: Container logs
+        if: failure()
+        run: |
+          for c in mcp-full mcp-refresh; do
+            docker container inspect "$c" >/dev/null 2>&1 || continue
+            echo "::group::$c"; docker logs "$c" 2>&1 | tail -n 100; echo "::endgroup::"
+          done
