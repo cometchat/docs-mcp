@@ -11,6 +11,11 @@
  * the current version come from the docs.json navigation, falling back to the
  * path for repos (or pages) it does not cover — see src/search/navigation.ts.
  * Shared snippets a page imports from /snippets/ are indexed as part of it.
+ *
+ * Diagnostics go to stderr, one line each; nothing goes to stdout. A line
+ * starting "WARNING: " marks a degraded build, and the in-container refresher
+ * logs such a build at warn. A docs.json problem never fails the build: the
+ * index is still written, with versions derived from paths.
  */
 import { readdir, readFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
@@ -161,27 +166,43 @@ async function main() {
   insertMany(rows);
   db.exec(`INSERT INTO pages_fts(pages_fts) VALUES('optimize');`);
   const total = db
-    .prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(is_current = 0), 0) AS legacy FROM pages`)
-    .get() as { n: number; legacy: number };
+    .prepare(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(is_current = 0), 0) AS legacy,
+         COALESCE(SUM(product IS NOT NULL), 0) AS nav FROM pages`,
+    )
+    .get() as { n: number; legacy: number; nav: number };
   // Finalize out of WAL: a WAL-mode file needs writable -wal/-shm siblings even
   // for readonly opens, which breaks read-only index mounts in production.
   db.pragma("journal_mode = DELETE");
   db.close();
+  if (nav.pages.size > 0 && total.nav === 0) {
+    // docs.json was read, but its page paths no longer match the files (a move
+    // or a reshaped repo), so every version still comes from the path.
+    console.error(
+      `WARNING: docs.json navigation lists ${nav.pages.size} pages but none matched an indexed page; ` +
+        "page versions come from paths",
+    );
+  }
   unsafeFrontmatter.push(...inliner.unsafe);
   if (unsafeFrontmatter.length > 0) {
     // Loud on purpose: docs pages never legitimately use an executable
     // frontmatter language, so this is either a mistake or an attack.
     console.error(
       `WARNING: skipped ${unsafeFrontmatter.length} page(s) with executable frontmatter: ` +
-        unsafeFrontmatter.slice(0, 10).join(", "),
+        unsafeFrontmatter.slice(0, 10).map(oneLine).join(", "),
     );
   }
   const unfilterable = [...new Set(rows.flatMap((r) => (r.version && !VERSION_LABEL_RE.test(r.version) ? [r.version] : [])))];
   if (unfilterable.length > 0) {
     // Stored and reported on results, but SearchInputSchema rejects them.
-    console.error(`WARNING: version label(s) the search version filter cannot match: ${unfilterable.join(", ")}`);
+    // Capped: the labels are docs text, and the refresher logs this line.
+    const shown = unfilterable.slice(0, 10).map((l) => Array.from(oneLine(l)).slice(0, 40).join(""));
+    const more = unfilterable.length > 10 ? ` (and ${unfilterable.length - 10} more)` : "";
+    console.error(`WARNING: version label(s) the search version filter cannot match: ${shown.join(", ")}${more}`);
   }
-  console.error(`Index built: ${total.n} pages (${total.legacy} older-version) → ${INDEX_PATH}`);
+  console.error(
+    `Index built: ${total.n} pages (${total.legacy} older-version, ${total.nav} from docs.json navigation) → ${INDEX_PATH}`,
+  );
 }
 
 type Row = {
@@ -196,28 +217,63 @@ type Row = {
 };
 
 /**
- * docs.json navigation is the source of truth for versions. A repo without one
- * (the refresh E2E fixture) or with an unparseable one still builds, with
- * versions derived from paths alone.
+ * docs.json navigation is the source of truth for versions. A repo without a
+ * usable one (the refresh E2E fixture has none) still builds, with versions
+ * derived from paths alone. Each way it can be unusable prints its own WARNING,
+ * so the refresher's logs say which one happened.
  */
 async function loadNavigation(repo: string): Promise<NavigationIndex> {
   let raw: string;
   try {
     raw = await readFile(path.join(repo, "docs.json"), "utf8");
-  } catch {
-    console.error("No docs.json found; deriving page versions from paths");
-    return indexNavigation(null);
-  }
-  try {
-    const nav = indexNavigation(JSON.parse(raw));
-    console.error(`docs.json navigation lists ${nav.pages.size} pages`);
-    return nav;
   } catch (err) {
+    // The errno code only: the message would add the clone's temporary path.
+    const code = (err as NodeJS.ErrnoException).code;
     console.error(
-      `WARNING: docs.json is not valid JSON (${(err as Error).message}); deriving page versions from paths`,
+      code === "ENOENT"
+        ? "WARNING: no docs.json found; deriving page versions from paths"
+        : `WARNING: docs.json could not be read (${code ?? "unknown error"}); deriving page versions from paths`,
     );
     return indexNavigation(null);
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.error(
+      `WARNING: docs.json is not valid JSON (${oneLine((err as Error).message)}); deriving page versions from paths`,
+    );
+    return indexNavigation(null);
+  }
+  let nav: NavigationIndex;
+  try {
+    nav = indexNavigation(parsed);
+  } catch (err) {
+    // Valid JSON the recursive walk cannot handle, such as nesting deep enough
+    // to overflow the stack: calling it invalid JSON would send someone looking
+    // for a syntax error that is not there.
+    const e = err as Error;
+    console.error(
+      `WARNING: docs.json navigation could not be indexed (${oneLine(`${e.name}: ${e.message}`)}); ` +
+        "deriving page versions from paths",
+    );
+    return indexNavigation(null);
+  }
+  if (nav.pages.size === 0) {
+    console.error("WARNING: docs.json navigation lists 0 pages; deriving page versions from paths");
+    return nav;
+  }
+  console.error(`docs.json navigation lists ${nav.pages.size} pages`);
+  return nav;
+}
+
+/**
+ * Docs text (a JSON.parse excerpt, a label, a file name) folded onto one line:
+ * the refresher logs each stderr line on its own, so a line break would split
+ * a WARNING and could pass the rest off as a line of its own.
+ */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ");
 }
 
 async function collectMdx(root: string): Promise<string[]> {

@@ -15,6 +15,12 @@
  *      leak the server's environment during the in-container rebuild
  *   5. a git location inherited from a hook (GIT_DIR, GIT_INDEX_FILE) is
  *      ignored, so running this from a worktree hook cannot touch that repo
+ *   6. a commit that loses docs.json navigation (deleted, then corrupted) is
+ *      REJECTED, the builder's WARNING reaches the logs, and restoring
+ *      docs.json is adopted
+ *   7. a build that times out or crashes logs a warn-level build event with
+ *      its output and how it ended, and lastError names the crash rather than
+ *      an earlier WARNING line
  *
  * Usage: npx tsx scripts/verify-index-refresh.ts
  */
@@ -25,6 +31,7 @@ import path from "node:path";
 import assert from "node:assert/strict";
 import { SqliteSearchClient } from "../src/search/sqlite.js";
 import { IndexRefresher } from "../src/index/refresher.js";
+import { logger } from "../src/lib/logger.js";
 import { withoutGitRepoEnv } from "../src/lib/git-env.js";
 
 const root = mkdtempSync(path.join(tmpdir(), "verify-refresh-"));
@@ -51,8 +58,8 @@ function writePages(count: number, marker: string): void {
   }
 }
 
-function commit(msg: string): string {
-  git(["add", "-A"]);
+function commit(msg: string, cwd = repo): string {
+  git(["add", "-A"], cwd);
   // gpgsign=false: the throwaway repo must not inherit a developer's global
   // signing config, which would prompt for a key passphrase.
   git([
@@ -66,8 +73,8 @@ function commit(msg: string): string {
     "-q",
     "-m",
     msg,
-  ]);
-  return git(["rev-parse", "HEAD"]).trim();
+  ], cwd);
+  return git(["rev-parse", "HEAD"], cwd).trim();
 }
 
 function buildIndex(from: string, out: string): void {
@@ -90,6 +97,32 @@ const check = async (label: string, fn: () => void | Promise<void>) => {
     console.error(`  ✗ ${label}\n      ${msg}`);
   }
 };
+
+type Logged = { level: "info" | "warn" | "error"; obj: Record<string, unknown>; msg: string };
+
+/**
+ * Records the logger calls made at `levels`, still passing each one on, until
+ * restore() is called. pino assigns its level methods on the instance, so they
+ * can be wrapped.
+ */
+function captureLogs(levels: Logged["level"][]): { logged: Logged[]; restore: () => void } {
+  const logged: Logged[] = [];
+  const originals = levels.map((level) => ({ level, write: logger[level] }));
+  for (const { level, write } of originals) {
+    logger[level] = ((obj: Record<string, unknown>, msg: string) => {
+      logged.push({ level, obj, msg });
+      write.call(logger, obj, msg);
+    }) as typeof logger.warn;
+  }
+  const restore = () => {
+    for (const { level, write } of originals) logger[level] = write;
+  };
+  return { logged, restore };
+}
+
+/** The events logged at `level` as `msg` for one docs commit. */
+const eventsFor = (logged: Logged[], level: Logged["level"], msg: string, sha: string) =>
+  logged.filter((e) => e.level === level && e.msg === msg && e.obj.docsCommit === sha);
 
 async function main() {
   console.log("verify-index-refresh: setting up a local docs repo");
@@ -268,7 +301,7 @@ async function main() {
     const failWork = path.join(root, "fail-generations");
     mkdirSync(failWork, { recursive: true });
     writePages(40, "foxtrot");
-    commit("gen6 — builds will time out");
+    const timeoutSha = commit("gen6 — builds will time out");
     const failRefresher = new IndexRefresher({
       searchClient: failClient,
       repoUrl: repo,
@@ -281,8 +314,13 @@ async function main() {
       maxAttempts: 2,
     });
 
-    await failRefresher.tick();
-    await failRefresher.tick();
+    const capture = captureLogs(["warn"]);
+    try {
+      await failRefresher.tick();
+      await failRefresher.tick();
+    } finally {
+      capture.restore();
+    }
     const poisonedAfter = failRefresher.snapshot().poisoned;
 
     const spy = failRefresher as unknown as { build: (a: string, b: string) => Promise<void> };
@@ -297,6 +335,20 @@ async function main() {
     await check("a commit whose build keeps failing is abandoned after maxAttempts", () => {
       assert.ok(poisonedAfter >= 1, "expected the failing commit to be abandoned");
       assert.equal(buildsAfterGiveUp, 0, "must not keep rebuilding an abandoned commit");
+      assert.match(String(failRefresher.snapshot().lastError), /timed out after 1ms/);
+    });
+
+    await check("each timed-out build logs a warn-level index_refresh_build_finished", () => {
+      const built = eventsFor(capture.logged, "warn", "index_refresh_build_finished", timeoutSha);
+      assert.equal(built.length, 2, "expected one event per attempt");
+      for (const { obj } of built) {
+        // A 1 ms timeout kills tsx before it relays signals, so this is the bare
+        // execFile shape; the shapes tsx reports are unit-tested.
+        assert.deepEqual(
+          { ok: obj.ok, exitCode: obj.exitCode, signal: obj.signal, timedOut: obj.timedOut },
+          { ok: false, exitCode: null, signal: "SIGTERM", timedOut: true },
+        );
+      }
     });
 
     await check("failed builds leave no orphaned index files", () => {
@@ -308,6 +360,163 @@ async function main() {
 
     await failRefresher.stop();
     failClient.close();
+  }
+
+  // ---- Scenario 7b: a build that crashes is named by its crash -----------
+  // The builder exits non-zero only when something like a full disk breaks it,
+  // which a fixture cannot arrange. A preload passed through the allowlisted
+  // NODE_OPTIONS makes the build process fail the same way instead: a WARNING
+  // line, then an uncaught Error.
+  {
+    const crashWork = path.join(root, "crash-generations");
+    const preload = path.join(root, "crash-preload.cjs");
+    mkdirSync(crashWork, { recursive: true });
+    writeFileSync(
+      preload,
+      [
+        'require("node:fs").writeSync(2, "WARNING: printed before the crash" + String.fromCharCode(10));',
+        'throw new Error("simulated build crash");',
+      ].join("\n"),
+    );
+    writePages(40, "golf");
+    const crashSha = commit("gen7 — the build crashes");
+    const crashClient = new SqliteSearchClient(seedIndex);
+    const crashRefresher = new IndexRefresher({
+      searchClient: crashClient,
+      repoUrl: repo,
+      ref: "main",
+      workDir: crashWork,
+      pollIntervalMs: 60_000,
+      keepGenerations: 2,
+      policy: { minPages: 10, maxDropRatio: 0.2 },
+    });
+    const savedNodeOptions = process.env.NODE_OPTIONS;
+    const capture = captureLogs(["warn"]);
+    process.env.NODE_OPTIONS = `--require ${JSON.stringify(preload)}`;
+    try {
+      await crashRefresher.tick();
+    } finally {
+      if (savedNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = savedNodeOptions;
+      capture.restore();
+    }
+
+    await check("a crashed build logs its output and exit, and lastError names the crash", () => {
+      const [built] = eventsFor(capture.logged, "warn", "index_refresh_build_finished", crashSha);
+      assert.ok(built, "expected a warn-level index_refresh_build_finished event");
+      const lines = built.obj.lines as string[];
+      assert.ok(lines.includes("WARNING: printed before the crash"), `got ${JSON.stringify(lines)}`);
+      assert.ok(lines.includes("Error: simulated build crash"), `got ${JSON.stringify(lines)}`);
+      const { ok, warnings, exitCode, signal, timedOut } = built.obj;
+      assert.deepEqual(
+        { ok, warnings, exitCode, signal, timedOut },
+        { ok: false, warnings: 1, exitCode: 1, signal: null, timedOut: false },
+      );
+      assert.equal(crashRefresher.snapshot().lastError, "index build exited with code 1: Error: simulated build crash");
+    });
+
+    await crashRefresher.stop();
+    crashClient.close();
+  }
+
+  // ---- Scenario 8: a commit that loses docs.json navigation --------------
+  // A docs.json the builder cannot use still builds every page, so the page
+  // rules pass while versions silently fall back to paths: only the navigation
+  // count catches it, and only the builder's WARNING says why. A repo of its
+  // own, because the scenarios above share `repo`, which has no docs.json.
+  {
+    const navRepo = path.join(root, "docs-nav");
+    const navSeed = path.join(root, "nav-seed.sqlite");
+    const navWork = path.join(root, "nav-generations");
+    mkdirSync(navRepo, { recursive: true });
+    mkdirSync(navWork, { recursive: true });
+    git(["init", "-q", "-b", "main"], navRepo);
+    const names = Array.from({ length: 40 }, (_, i) => `page-${i}`);
+    names.forEach((name, i) =>
+      writeFileSync(path.join(navRepo, `${name}.mdx`), page(`Page ${i}`, `nav chat message content ${i}`)),
+    );
+    // The tab label matters: a page listed under an empty trail gets no product.
+    const docsJson = JSON.stringify({ navigation: { tabs: [{ tab: "Docs", pages: names }] } });
+    writeFileSync(path.join(navRepo, "docs.json"), docsJson);
+    commit("nav — docs.json lists every page", navRepo);
+    buildIndex(navRepo, navSeed);
+
+    const navClient = new SqliteSearchClient(navSeed);
+    const navRefresher = new IndexRefresher({
+      searchClient: navClient,
+      repoUrl: navRepo,
+      ref: "main",
+      workDir: navWork,
+      pollIntervalMs: 60_000,
+      keepGenerations: 2,
+      policy: { minPages: 10, maxDropRatio: 0.2 },
+      smokeQueries: ["chat"],
+    });
+
+    const capture = captureLogs(["info", "warn", "error"]);
+    const find = (level: Logged["level"], msg: string, sha: string) =>
+      eventsFor(capture.logged, level, msg, sha).at(0);
+    const buildLines = (sha: string) =>
+      (find("warn", "index_refresh_build_finished", sha)?.obj.lines ?? []) as string[];
+
+    try {
+      rmSync(path.join(navRepo, "docs.json"));
+      const missingSha = commit("nav — docs.json deleted", navRepo);
+      await navRefresher.tick();
+
+      await check("a commit deleting docs.json is REJECTED for losing navigation", () => {
+        assert.equal(navClient.currentPath(), navSeed, "the seed index must keep serving");
+        assert.equal(navRefresher.snapshot().docsCommit, null, "no commit should be adopted");
+        assert.match(String(navRefresher.snapshot().lastError), /docs\.json navigation for 0 pages vs 40/);
+        const rejected = find("error", "index_refresh_rejected", missingSha);
+        assert.ok(rejected, "expected an index_refresh_rejected event");
+        assert.equal(rejected.obj.code, "navigation_regression");
+        assert.deepEqual(rejected.obj.served, { pages: 40, navPages: 40 });
+        assert.deepEqual(rejected.obj.candidate, { pages: 40, navPages: 0 });
+      });
+
+      await check("the builder's missing docs.json WARNING is logged at warn", () => {
+        const built = find("warn", "index_refresh_build_finished", missingSha);
+        assert.ok(built, "expected a warn-level index_refresh_build_finished event");
+        assert.ok(Number(built.obj.warnings) >= 1, `expected warnings >= 1, got ${built.obj.warnings}`);
+        assert.ok(
+          buildLines(missingSha).some((l) => l.startsWith("WARNING: no docs.json found")),
+          `expected the WARNING line, got ${JSON.stringify(buildLines(missingSha))}`,
+        );
+      });
+
+      writeFileSync(path.join(navRepo, "docs.json"), "{ not json");
+      const corruptSha = commit("nav — docs.json corrupted", navRepo);
+      await navRefresher.tick();
+
+      await check("a corrupt docs.json is REJECTED and its WARNING is logged", () => {
+        assert.equal(navClient.currentPath(), navSeed, "the seed index must keep serving");
+        assert.match(String(navRefresher.snapshot().lastError), /docs\.json navigation for 0 pages vs 40/);
+        assert.ok(find("error", "index_refresh_rejected", corruptSha), "expected the corrupt commit to be rejected");
+        assert.ok(
+          buildLines(corruptSha).some((l) => l.startsWith("WARNING: docs.json is not valid JSON")),
+          `expected the WARNING line, got ${JSON.stringify(buildLines(corruptSha))}`,
+        );
+      });
+
+      writeFileSync(path.join(navRepo, "docs.json"), docsJson);
+      const restoredSha = commit("nav — docs.json restored", navRepo);
+      await navRefresher.tick();
+
+      await check("restoring docs.json is adopted, with no warn-level build event", () => {
+        const s = navRefresher.snapshot();
+        assert.equal(s.docsCommit, restoredSha, `expected ${restoredSha.slice(0, 7)}, got ${s.lastError}`);
+        assert.equal(s.lastError, null);
+        assert.equal(find("warn", "index_refresh_build_finished", restoredSha), undefined, "a clean build logs at info");
+        const succeeded = find("info", "index_refresh_succeeded", restoredSha);
+        assert.ok(succeeded, "expected an index_refresh_succeeded event");
+        assert.equal(succeeded.obj.navPages, 40);
+      });
+    } finally {
+      capture.restore();
+      await navRefresher.stop();
+      navClient.close();
+    }
   }
 
   // --- hostile docs commit: executable frontmatter -------------------------
@@ -369,9 +578,11 @@ async function main() {
     });
 
     await check("the skip is reported loudly, not silently swallowed", () => {
-      assert.ok(
-        /executable frontmatter/i.test(combined),
-        "expected a warning naming the skipped page",
+      // The WARNING: prefix is what makes the refresher log the build at warn.
+      assert.match(
+        built.stderr,
+        /^WARNING: skipped 1 page\(s\) with executable frontmatter: evil\.mdx$/m,
+        "expected a WARNING line naming the skipped page",
       );
     });
   }

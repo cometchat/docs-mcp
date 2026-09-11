@@ -134,6 +134,16 @@ jobs:
             echo "::error::--target runtime touched the docs repo; it must stay hermetic"; exit 1
           fi
 
+      - name: Runtime image ships production dependencies only
+        run: |
+          docker run --rm --pull never --entrypoint node mcp:runtime -e '
+            const fs = require("fs");
+            const lock = require("/app/package-lock.json").packages;
+            const dev = Object.keys(lock).filter((k) => lock[k].dev && fs.existsSync("/app/" + k));
+            if (dev.length) { console.error("devDependencies in the image:\n" + dev.join("\n")); process.exit(1); }
+            if (!fs.existsSync("/app/node_modules/.bin/tsx")) { console.error("node_modules/.bin/tsx is missing"); process.exit(1); }' \
+            || { echo "::error::the runtime image must ship production dependencies only, tsx included"; exit 1; }
+
       - name: Bare build fails on the DOCS_COMMIT guard
         run: |
           if docker buildx build --progress=plain . > bare.log 2>&1; then

@@ -237,8 +237,15 @@ describe("POST /mcp — 4mb body limit (Express 5)", () => {
       },
     }) + " ".repeat(pad);
 
+  /** Bodies at least this large wait for the server to answer from the headers. */
+  const STAGED_BODY_BYTES = 1024 * 1024;
+  const HEADERS_ONLY_GRACE_MS = 5_000;
+
   function post(contentType: string, body: string) {
+    const payload = Buffer.from(body);
     return new Promise<{ status: number; sessionId?: string; text: string }>((resolve, reject) => {
+      let settled = false;
+      let grace: NodeJS.Timeout | undefined;
       const req = request(
         {
           host: "127.0.0.1",
@@ -249,30 +256,44 @@ describe("POST /mcp — 4mb body limit (Express 5)", () => {
           headers: {
             "content-type": contentType,
             accept: "application/json, text/event-stream",
-            "content-length": Buffer.byteLength(body),
+            "content-length": payload.length,
           },
         },
         (res) => {
+          clearTimeout(grace);
           let text = "";
           res.setEncoding("utf8");
           res.on("data", (chunk: string) => (text += chunk));
-          res.on("end", () =>
+          res.on("end", () => {
+            settled = true;
             resolve({
               status: res.statusCode ?? 0,
               sessionId: res.headers["mcp-session-id"] as string | undefined,
               text,
-            }),
-          );
+            });
+            // An answer that came before the upload finished leaves the request
+            // open; end it rather than write into a connection being closed.
+            req.destroy();
+          });
         },
       );
-      // The server answers an over-limit body without reading it and closes the
-      // connection, so the upload can fail with EPIPE after the response has
-      // arrived. That late socket error once surfaced as an uncaught exception
-      // and failed the run; this listener absorbs it, while an error before any
-      // response still rejects through the request.
+      // Socket errors once the reply is in (the server closing) are expected.
       req.on("socket", (socket) => socket.on("error", () => {}));
-      req.on("error", reject);
-      req.end(body);
+      req.on("error", (err) => {
+        if (!settled) reject(err);
+      });
+      if (payload.length < STAGED_BODY_BYTES) {
+        req.end(payload);
+        return;
+      }
+      // The server rejects an over-limit body from its headers alone, then
+      // closes the connection without reading the upload. Writing 5 MB at once
+      // raced that close: a reset could arrive before the reply was read, and
+      // the test failed with ECONNRESET or EPIPE. So send the headers, give the
+      // server time to answer, and send the body only if it has not. A server
+      // that reads the body, the regression under test, still receives it all.
+      req.flushHeaders();
+      grace = setTimeout(() => req.end(payload), HEADERS_ONLY_GRACE_MS);
     });
   }
 

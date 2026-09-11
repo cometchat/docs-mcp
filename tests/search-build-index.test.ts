@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { inspectIndex } from "../src/index/refresher.js";
 import { SqliteSearchClient } from "../src/search/sqlite.js";
 
 // Runs the real builder (as the in-container refresher does) over a small docs
@@ -124,8 +125,8 @@ function stored(index: string): Map<string, Stored> {
 describe("build-index version metadata", () => {
   it(
     "derives product, version and currency from docs.json",
-    () => {
-      const { index } = build(makeRepo("with-nav", JSON.stringify(DOCS_JSON)));
+    async () => {
+      const { index, stderr } = build(makeRepo("with-nav", JSON.stringify(DOCS_JSON)));
       const pages = stored(index);
       expect(pages.get("/ui-kit/react/overview")).toMatchObject({
         product: "Chat & Messaging / UI Kits / React",
@@ -160,6 +161,10 @@ describe("build-index version metadata", () => {
       // The version label is metadata, not searchable text.
       expect(ftsColumns).toEqual(["title", "body", "section"]);
       expect(String(journal).toLowerCase()).toBe("delete");
+      // 6 listed pages, plus llms-react-v7 inheriting its folder's doc set;
+      // calls/v4/javascript/setup falls back to its path.
+      expect(stderr).toMatch(/Index built: 8 pages \(\d+ older-version, 7 from docs\.json navigation\)/);
+      expect((await inspectIndex(index)).navPages).toBe(7);
     },
     BUILD_TIMEOUT_MS,
   );
@@ -184,6 +189,7 @@ describe("build-index version metadata", () => {
       const r = await client.search("send message", { limit: 5 });
       client.close();
       expect(r.results.length).toBeGreaterThan(0);
+      expect((await inspectIndex(index)).navPages).toBe(0);
     },
     BUILD_TIMEOUT_MS,
   );
@@ -205,6 +211,115 @@ describe("build-index version metadata", () => {
       const { index, stderr } = build(makeRepo("odd-label", nav));
       expect(stored(index).get("/ui-kit/react/overview")).toMatchObject({ version: "latest", is_current: 1 });
       expect(stderr).toContain("WARNING: version label(s) the search version filter cannot match: latest");
+    },
+    BUILD_TIMEOUT_MS,
+  );
+
+  it(
+    "caps the version label warning, since the refresher logs it",
+    () => {
+      const versions = Array.from({ length: 12 }, (_, i) => {
+        const n = String(i).padStart(2, "0");
+        return { version: `legacy-${n}-${"x".repeat(50)}`, groups: [{ group: "Start", pages: [`legacy/${n}/overview`] }] };
+      });
+      const extra = Object.fromEntries(
+        versions.map((_, i) => [
+          `legacy/${String(i).padStart(2, "0")}/overview`,
+          `---\ntitle: Legacy ${i}\n---\n\nThis page explains how to send a message with legacy kit ${i}.\n`,
+        ]),
+      );
+      const nav = { navigation: { tabs: [{ tab: "Legacy", dropdowns: [{ dropdown: "Kit", versions }] }] } };
+      const { stderr } = build(makeRepo("many-labels", JSON.stringify(nav), extra));
+
+      const prefix = "WARNING: version label(s) the search version filter cannot match: ";
+      const line = stderr.split("\n").find((l) => l.startsWith(prefix)) ?? "";
+      expect(line).toMatch(/ \(and 2 more\)$/);
+      const labels = line.slice(prefix.length).replace(/ \(and 2 more\)$/, "").split(", ");
+      expect(labels).toHaveLength(10);
+      for (const label of labels) expect(Array.from(label).length).toBeLessThanOrEqual(40);
+    },
+    BUILD_TIMEOUT_MS,
+  );
+
+  it(
+    "names docs.json nesting too deep to index instead of calling it invalid JSON",
+    () => {
+      // JSON.parse accepts this; the recursive navigation walk overflows the stack.
+      const deep = '{"navigation":' + "[".repeat(20_000) + "]".repeat(20_000) + "}";
+      const { index, stderr } = build(makeRepo("deep-nav", deep));
+      expect(stderr).toContain(
+        "WARNING: docs.json navigation could not be indexed (RangeError: Maximum call stack size exceeded)",
+      );
+      expect(stderr).not.toContain("not valid JSON");
+      expect(stored(index).get("/ui-kit/react/v6/overview")).toMatchObject({ product: null, version: "v6", is_current: 0 });
+    },
+    BUILD_TIMEOUT_MS,
+  );
+
+  it.each<[string, (repo: string) => void, string, string]>([
+    [
+      "is a directory",
+      (repo) => mkdirSync(path.join(repo, "docs.json")),
+      "WARNING: docs.json could not be read (EISDIR)",
+      "no docs.json found",
+    ],
+    [
+      "is null",
+      (repo) => writeFileSync(path.join(repo, "docs.json"), "null"),
+      "WARNING: docs.json navigation lists 0 pages",
+      "no docs.json found",
+    ],
+    ["is absent", () => {}, "WARNING: no docs.json found", "could not be read"],
+  ])(
+    "warns when docs.json %s",
+    (state, setup, warning, notWarning) => {
+      const repo = makeRepo(`docs-json-${state.replace(/ /g, "-")}`, null);
+      setup(repo);
+      const { stderr } = build(repo);
+      expect(stderr).toContain(warning);
+      expect(stderr).not.toContain(notWarning);
+      // Exactly one WARNING: a docs.json that lists no pages must not also be
+      // reported as matching none of them.
+      expect(stderr.split("\n").filter((l) => l.startsWith("WARNING:"))).toHaveLength(1);
+    },
+    BUILD_TIMEOUT_MS,
+  );
+
+  it(
+    "warns when docs.json navigation matches none of the indexed pages",
+    async () => {
+      const nav = { navigation: { tabs: [{ tab: "Docs", pages: ["missing/a", "missing/b"] }] } };
+      const { index, stderr } = build(makeRepo("unmatched-nav", JSON.stringify(nav)));
+      expect(stderr).toContain("WARNING: docs.json navigation lists 2 pages but none matched an indexed page");
+      expect((await inspectIndex(index)).navPages).toBe(0);
+    },
+    BUILD_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps the invalid JSON WARNING on one line when docs.json is pretty-printed",
+    () => {
+      // V8 quotes the source around the error, line breaks included, and the
+      // refresher logs each stderr line on its own.
+      const pretty = '{\n  "navigation": {\n    "pages": [\n      "a",\n      "b",\n    ]\n  }\n}\n';
+      const { stderr } = build(makeRepo("pretty-bad-nav", pretty));
+      const warning = stderr.split("\n").find((l) => l.startsWith("WARNING: docs.json is not valid JSON")) ?? "";
+      expect(warning).toMatch(/; deriving page versions from paths$/);
+    },
+    BUILD_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps version labels and page paths with line breaks on one WARNING line each",
+    () => {
+      const versions = [{ version: "Odd\nError: label", groups: [{ group: "Start", pages: ["ui-kit/react/overview"] }] }];
+      const nav = { navigation: { tabs: [{ tab: "Docs", dropdowns: [{ dropdown: "Kit", versions }] }] } };
+      const hostile = '---js\n{ title: "x" }\n---\n\nThis page has executable frontmatter, so the build skips it.\n';
+      const { stderr } = build(makeRepo("line-breaks", JSON.stringify(nav), { "bad\nError: path": hostile }));
+      const lines = stderr.split("\n");
+      expect(lines).toContain("WARNING: version label(s) the search version filter cannot match: odd error: label");
+      expect(lines).toContain("WARNING: skipped 1 page(s) with executable frontmatter: bad Error: path.mdx");
+      expect(lines.filter((l) => /^error: /i.test(l))).toEqual([]);
     },
     BUILD_TIMEOUT_MS,
   );

@@ -25,6 +25,11 @@ COPY scripts ./scripts
 COPY bundles ./bundles
 COPY skills ./skills
 RUN npm run build
+# The runtime stage copies this node_modules, so drop devDependencies now that
+# tsc has run. tsx stays: it is a production dependency because the refresher
+# and the indexer stage run scripts/build-index.ts under it. Prune only deletes
+# packages, so the better-sqlite3 addon installed above is kept as built.
+RUN npm prune --omit=dev --no-audit --no-fund
 
 # ── target: runtime ── app only, never touches the docs repo ────────────────
 FROM node:24-bookworm-slim AS runtime
@@ -73,13 +78,16 @@ ARG DOCS_COMMIT=unpinned
 # Sparse, blobless clone of top-level files + *.mdx anywhere ('/*' keeps root
 # files, '!/*/' drops directories, '**/*.mdx' re-includes the docs tree), then
 # check out exactly DOCS_COMMIT so the label on `full` matches what was indexed.
+# tsx by path, not npx: if tsx were missing, npx in a non-TTY build installs
+# whatever tsx the registry serves instead of failing (refresher.ts uses the
+# same path).
 RUN test "${DOCS_COMMIT}" != "unpinned" || { echo "ERROR: --build-arg DOCS_COMMIT=<sha> is required for --target full"; exit 1; } \
     && echo "baking index: ${DOCS_REPO_URL}@${DOCS_REF} (${DOCS_COMMIT})" \
     && git clone --depth 1 --filter=blob:none --sparse --branch "${DOCS_REF}" "${DOCS_REPO_URL}" /tmp/docs \
     && git -C /tmp/docs sparse-checkout set --no-cone '/*' '!/*/' '**/*.mdx' \
     && git -C /tmp/docs fetch --depth 1 origin "${DOCS_COMMIT}" \
     && git -C /tmp/docs checkout "${DOCS_COMMIT}" \
-    && DOCS_REPO=/tmp/docs INDEX_PATH=/app/data/index.sqlite npx tsx scripts/build-index.ts \
+    && DOCS_REPO=/tmp/docs INDEX_PATH=/app/data/index.sqlite node_modules/.bin/tsx scripts/build-index.ts \
     && rm -rf /tmp/docs
 
 # ── target: full ── runtime + baked index ───────────────────────────────────

@@ -236,7 +236,7 @@ docs-mcp/
 | `INDEX_WORK_DIR` | `./data/generations` | Where rebuilt index generations are written (tmpfs in production) |
 | `INDEX_KEEP_GENERATIONS` | `2` | Previous index generations retained on disk for instant fallback |
 | `INDEX_MIN_PAGES` | `2000` | Absolute floor: a candidate index with fewer pages is rejected |
-| `INDEX_MAX_DROP_RATIO` | `0.2` | Relative floor: reject a candidate losing more than this fraction of the served page count |
+| `INDEX_MAX_DROP_RATIO` | `0.2` | Relative floor: reject a candidate losing more than this fraction of the served page count, or of the served pages whose versions come from docs.json navigation |
 | `DOCS_REPO_URL` | `https://github.com/cometchat/docs.git` | Public docs repo; cloned anonymously, no credentials |
 | `DOCS_REF` | `main` | Branch to follow |
 | `DOCS_COMMIT_PIN` | _unset_ | Freeze on one commit and stop following `HEAD` (incident escape hatch) |

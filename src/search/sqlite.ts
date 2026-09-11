@@ -216,6 +216,22 @@ export class SqliteSearchClient implements SearchClient {
     }
   }
 
+  /**
+   * Pages of the served index versioned by docs.json navigation; used to
+   * validate refresh candidates. Null for an index without the product column,
+   * or when there is no index to open.
+   */
+  navigationPageCount(): number | null {
+    try {
+      const row = this.open().db.prepare("SELECT COUNT(*) AS n FROM pages WHERE product IS NOT NULL").get() as
+        | { n: number }
+        | undefined;
+      return row?.n ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   isReady(): boolean {
     return this.prepared !== null || existsSync(this.indexPath);
   }

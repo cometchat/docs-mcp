@@ -116,6 +116,7 @@ all of:
 |---|---|---|
 | `INDEX_MIN_PAGES` | 2000 | empty or catastrophically broken build |
 | `INDEX_MAX_DROP_RATIO` | 0.2 | a docs merge that silently deletes a chunk of pages |
+| docs.json navigation coverage | `INDEX_MAX_DROP_RATIO` (0.2) | a docs.json the builder cannot use (missing, unparseable, reshaped, or no longer matching page paths): every page still builds, but versions silently fall back to paths. Applies only when the served index took versions from docs.json |
 | `journal_mode != wal` | — | a file that would fail on a read-only mount |
 | post-swap smoke queries | — | an index that validates but cannot answer |
 
@@ -130,7 +131,11 @@ immutable and always present. The server therefore never depends on GitHub
 being reachable at boot.
 
 **Requirements:** `git` in the runtime image (already added), a writable
-`INDEX_WORK_DIR`, and ~1 GB task memory to cover the builder's peak. The work
+`INDEX_WORK_DIR`, and ~1 GB task memory to cover the builder's peak. The image
+ships production dependencies only (`npm prune --omit=dev` in the
+Dockerfile build stage); `tsx` is a production dependency because the
+refresh runs the index build under it, and `tests/image-layout.test.ts`
+fails if it moves back to `devDependencies`. The work
 dir is the **only** writable path the task needs: the clone, the candidate
 index, and the build child's `TMPDIR`/`SQLITE_TMPDIR` all live under it, because
 `/tmp` is unwritable when the root filesystem is read-only (the `tsx` runner
@@ -154,15 +159,49 @@ without it: `EACCES: permission denied, mkdtemp`; with it: refresh succeeds.
 commit, or `INDEX_AUTO_REFRESH=false` to fall back to the baked index. Both
 take effect on the next deploy.
 
+A `navigation_regression` rejection keeps the last good index serving until a
+later docs commit restores the navigation, or until the next deploy rebaselines:
+the deploy bakes its index from docs `HEAD`, so an intentional large navigation
+change (delisting a legacy version while keeping its pages, say) applies then.
+`INDEX_MAX_DROP_RATIO=1` disables both relative rules, page count and
+navigation coverage; it too takes effect on the next deploy.
+
 `/health` reports `indexRefresh` with `docsCommit`, `builtAt`, `lastCheckedAt`,
 retained `generations` and `lastRefreshOk`. The diagnostic fields — `lastError`
 (sanitized, but still carrying filesystem paths and errno codes) and `poisoned`
 — are withheld from the public payload and released only when a request carries
 `HEALTH_DETAIL_TOKEN`, via the `x-health-token` header (preferred; query strings
 end up in access logs) or `?detail=<token>`. Comparison is timing-safe and fails
-closed: with no token configured the detail is unreachable. Log events:
-`index_refresh_started`, `index_refresh_succeeded`, `index_refresh_rejected`,
-`index_refresh_reverted`, `index_refresh_cycle_failed`.
+closed: with no token configured the detail is unreachable.
+
+Log events: `index_refresh_started`, `index_refresh_build_finished`,
+`index_refresh_succeeded` (with `pages`, `bytes` and `navPages`),
+`index_refresh_rejected`, `index_refresh_reverted`, `index_refresh_cycle_failed`,
+`index_refresh_commit_abandoned` (a commit whose refresh kept failing is given
+up on) and `index_refresh_ref_unresolved` (`DOCS_REF` matched nothing).
+`index_refresh_build_finished` summarizes the builder's stderr once per build:
+`docsCommit`, `duration_ms`, `ok`, `warnings` (the count of `WARNING:` lines),
+`lines` (at most 20, each at most 300 characters, stack frames dropped, and
+control characters, line and paragraph separators and format characters such as
+bidi and zero-width marks replaced with spaces) and `linesOmitted`; a failed
+build adds `exitCode`, `signal` and `timedOut`. The builder runs under `tsx`,
+which exits 128+n when the builder dies of signal n, so `signal` is also read
+from that exit code: an out-of-memory kill logs `exitCode` 137 and `signal`
+`SIGKILL`. It logs at `info` when the build is clean, and at `warn` when the
+builder printed a `WARNING:` line (a degraded index: docs.json unusable, pages skipped for executable frontmatter, version
+labels the filter cannot match) or the build failed, which also logs
+`index_refresh_cycle_failed`. `index_refresh_rejected` carries `code` (such as
+`page_count_regression` or `navigation_regression`), `reason`, and `candidate`
+and `served` as `{pages, navPages}`, with `served` null when no index was being
+served. Alert on warn-level `index_refresh_build_finished`, on
+`index_refresh_rejected`, `index_refresh_reverted` and
+`index_refresh_ref_unresolved`, and on `index_refresh_commit_abandoned` or a
+sustained run of `index_refresh_cycle_failed`: a refresh that fails before it
+builds (the `EACCES` above, a clone or `ls-remote` error) logs no build or
+rejection event, while `/health` still reports `status: ok` (only
+`indexRefresh.lastRefreshOk` turns false). A failed build logs both
+`index_refresh_build_finished` and `index_refresh_cycle_failed`, so count it
+once.
 
 ## Usage analytics (PostHog, ENG-37102)
 

@@ -8,6 +8,12 @@ export interface IndexStats {
   /** SQLite journal_mode as reported by the file (lowercase). */
   journalMode: string;
   bytes: number;
+  /**
+   * Pages whose version metadata came from docs.json navigation
+   * (`pages.product IS NOT NULL`); null or absent for an index without that
+   * column. Optional so stats written before it existed still type-check.
+   */
+  navPages?: number | null;
 }
 
 export interface ValidationPolicy {
@@ -15,8 +21,9 @@ export interface ValidationPolicy {
   minPages: number;
   /**
    * Relative floor: reject a candidate that loses more than this fraction of
-   * the currently-served page count. Catches "docs merge dropped 40% of pages"
-   * — a regression an absolute floor alone waves through.
+   * the currently-served page count, or of its pages versioned by docs.json
+   * navigation. Catches "docs merge dropped 40% of pages" — a regression an
+   * absolute floor alone waves through.
    */
   maxDropRatio: number;
 }
@@ -63,6 +70,23 @@ export function validateCandidate(
         reason:
           `candidate has ${candidate.pages} pages vs ${current.pages} currently served ` +
           `(more than ${Math.round(policy.maxDropRatio * 100)}% drop)`,
+      };
+    }
+  }
+  // A docs.json the builder cannot use still builds every page, so the page
+  // rules pass while versions silently fall back to paths. Measured against the
+  // served index rather than required outright, so fixtures without docs.json
+  // and indexes from before version metadata keep working.
+  const servedNav = current?.navPages ?? 0;
+  if (servedNav > 0) {
+    const candidateNav = candidate.navPages ?? 0; // unknown fails closed
+    if (candidateNav < servedNav * (1 - policy.maxDropRatio)) {
+      return {
+        ok: false,
+        code: "navigation_regression",
+        reason:
+          `candidate takes page versions from docs.json navigation for ${candidateNav} pages vs ` +
+          `${servedNav} currently served (more than ${Math.round(policy.maxDropRatio * 100)}% drop)`,
       };
     }
   }

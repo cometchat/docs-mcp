@@ -9,7 +9,6 @@ const ConfigSchema = z.object({
   bundlesDir: z.string().default("./bundles"),
   skillsDir: z.string().default("./skills"),
   fetchTimeoutMs: z.coerce.number().int().positive().default(5000),
-  searchTimeoutMs: z.coerce.number().int().positive().default(5000),
   logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
   nodeEnv: z.enum(["development", "production", "test"]).default("development"),
   // In-container index refresh (opt-in: local dev and stdio are unaffected).
@@ -52,7 +51,6 @@ export function loadConfig(): Config {
     bundlesDir: env("BUNDLES_DIR"),
     skillsDir: env("SKILLS_DIR"),
     fetchTimeoutMs: env("FETCH_TIMEOUT_MS"),
-    searchTimeoutMs: env("SEARCH_TIMEOUT_MS"),
     logLevel: env("LOG_LEVEL"),
     nodeEnv: env("NODE_ENV"),
     indexAutoRefresh: env("INDEX_AUTO_REFRESH"),
