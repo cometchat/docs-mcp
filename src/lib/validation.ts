@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { VERSION_LABEL_RE, normalizeVersionLabel } from "../search/version.js";
 
 export const SearchInputSchema = z.object({
   query: z.string().min(1, "must be at least 1 character").max(500, "must be 500 characters or fewer"),
   version: z
     .string()
-    .regex(/^v\d+(\.\d+){0,2}$/, "must look like 'v4', 'v3.0', or 'v3.0.1'")
+    .regex(VERSION_LABEL_RE, "must be a version label like 'v7' or 'v5'")
+    .transform(normalizeVersionLabel)
     .optional(),
   limit: z.number().int().min(1).max(25).optional().default(10),
 });

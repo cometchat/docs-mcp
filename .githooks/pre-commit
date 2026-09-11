@@ -27,6 +27,12 @@ fi
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 [ -z "$STAGED" ] && exit 0
 
+# Git exports GIT_DIR, GIT_INDEX_FILE and friends to hooks (absolute paths in a
+# linked worktree). The checks below spawn their own git against throwaway
+# repos; inheriting these would point that git at THIS repository instead.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE GIT_PREFIX
+
 echo "pre-commit: type-check"
 npm run --silent lint
 
@@ -34,7 +40,7 @@ echo "pre-commit: unit tests"
 npm run --silent test
 
 # Paths whose behaviour the refresh verification actually covers.
-if printf '%s\n' "$STAGED" | grep -qE '^(src/index/|src/search/sqlite\.ts|src/config\.ts|src/server\.ts|src/lib/frontmatter\.ts|scripts/build-index\.ts|scripts/verify-index-refresh\.ts)'; then
+if printf '%s\n' "$STAGED" | grep -qE '^(src/index/|src/search/sqlite\.ts|src/config\.ts|src/server\.ts|src/app\.ts|src/lib/frontmatter\.ts|src/lib/git-env\.ts|scripts/build-index\.ts|scripts/verify-index-refresh\.ts)'; then
   echo "pre-commit: index-refresh end-to-end verification (index path changed)"
   npm run --silent verify:refresh
 else

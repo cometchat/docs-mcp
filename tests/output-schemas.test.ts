@@ -104,3 +104,84 @@ describe("tool outputs conform to declared outputSchema", () => {
     assertConforms(LIST_BUNDLES_TOOL_DEFINITION.outputSchema, result, "runListBundles");
   });
 });
+
+// A moved page adds redirectedFrom, the only optional fetch field; exercise it
+// over real HTTP (manual redirects, non-empty base path) against the schema.
+describe("fetch_cometchat_doc_page redirected output conforms to outputSchema", () => {
+  let httpServer: Server;
+  let docsBaseUrl: string;
+
+  beforeAll(async () => {
+    httpServer = createServer((req, res) => {
+      if (req.url === "/docs/moved.md") {
+        res.writeHead(308, { location: "/docs/fixture.md" });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/markdown" });
+      res.end("# Fixture Page\n\nMarkdown body for schema conformance testing.\n");
+    });
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const addr = httpServer.address();
+    docsBaseUrl = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}/docs`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+  });
+
+  it("fetch_cometchat_doc_page (redirected)", async () => {
+    const result = await runFetch({ path: "/moved" }, { docsBaseUrl, timeoutMs: 2000 });
+    expect(result.redirectedFrom).toBe("/moved");
+    expect(result.url).toBe(`${docsBaseUrl}/fixture`);
+    assertConforms(FETCH_TOOL_DEFINITION.outputSchema, result, "runFetch (redirected)");
+  });
+});
+
+describe("search_cometchat_docs output with version metadata conforms to outputSchema", () => {
+  // Indexes from the current builder add `version` and `isCurrent` to results;
+  // additionalProperties:false turns a lagging schema into a client outage.
+  let tmpDir: string;
+  let searchClient: SqliteSearchClient;
+
+  beforeAll(() => {
+    tmpDir = mkdtempSync(path.join(tmpdir(), "schema-version-test-"));
+    const indexPath = path.join(tmpDir, "index.sqlite");
+    const db = new Database(indexPath);
+    db.exec(`
+      CREATE TABLE pages (
+        id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, url TEXT NOT NULL, title TEXT NOT NULL,
+        section TEXT NOT NULL, product TEXT, version TEXT, is_current INTEGER NOT NULL DEFAULT 1, body TEXT NOT NULL
+      );
+      CREATE VIRTUAL TABLE pages_fts USING fts5(
+        title, body, section,
+        content='pages', content_rowid='id', tokenize='porter unicode61'
+      );
+      CREATE TRIGGER pages_ai AFTER INSERT ON pages BEGIN
+        INSERT INTO pages_fts(rowid, title, body, section) VALUES (new.id, new.title, new.body, new.section);
+      END;
+    `);
+    const insert = db.prepare(
+      "INSERT INTO pages (path, url, title, section, product, version, is_current, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    const body = "Presence indicators and typing events for chat apps.";
+    insert.run("/ui-kit/react/presence", "https://example.com/a", "Presence", "UI Kit / React", "React", "v7", 1, body);
+    insert.run("/ui-kit/react/v6/presence", "https://example.com/b", "Presence", "UI Kit / React", "React", "v6", 0, body);
+    insert.run("/fundamentals/presence", "https://example.com/c", "Presence", "Fundamentals", null, null, 1, body);
+    db.close();
+    searchClient = new SqliteSearchClient(indexPath);
+  });
+
+  afterAll(() => {
+    searchClient.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("current, legacy and unversioned results", async () => {
+    const result = await runSearch({ query: "presence indicators" }, searchClient);
+    expect(result.results).toHaveLength(3);
+    expect(result.results.some((r) => r.version === "v6" && r.isCurrent === false)).toBe(true);
+    expect(result.results.some((r) => r.version === undefined)).toBe(true);
+    assertConforms(SEARCH_TOOL_DEFINITION.outputSchema, result, "runSearch");
+  });
+});

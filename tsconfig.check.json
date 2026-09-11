@@ -1,0 +1,12 @@
+{
+  // Type-checks everything, including tests and scripts, which tsconfig.json
+  // leaves out because it is the build config (rootDir src). `npm run lint`
+  // uses this file; `npm run build` keeps tsconfig.json.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

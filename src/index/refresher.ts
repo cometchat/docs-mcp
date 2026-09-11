@@ -5,6 +5,7 @@ import { mkdtemp, rm, stat, mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { logger } from "../lib/logger.js";
+import { withoutGitRepoEnv } from "../lib/git-env.js";
 import type { SqliteSearchClient } from "../search/sqlite.js";
 import {
   DEFAULT_POLICY,
@@ -175,6 +176,7 @@ export class IndexRefresher {
       : `refs/heads/${this.opts.ref}`;
     const { stdout } = await exec("git", ["ls-remote", "--", this.opts.repoUrl, fullRef], {
       timeout: 30_000,
+      env: withoutGitRepoEnv(),
     });
     for (const line of stdout.split("\n")) {
       const [sha, name] = line.split(/\s+/);
@@ -251,6 +253,8 @@ export class IndexRefresher {
 
   private async clone(dir: string, docsCommit: string): Promise<void> {
     const timeout = this.opts.cloneTimeoutMs ?? 180_000;
+    // Never the repository of whatever process spawned us (see git-env.ts).
+    const env = withoutGitRepoEnv();
     // Blobless + sparse: fetches only mdx blobs (~44MB) instead of the full
     // repo (~390MB of assets). `--` stops a hostile ref/url being read as a flag.
     await exec(
@@ -267,15 +271,15 @@ export class IndexRefresher {
         this.opts.repoUrl,
         dir,
       ],
-      { timeout },
+      { timeout, env },
     );
     await exec(
       "git",
       ["-C", dir, "sparse-checkout", "set", "--no-cone", "/*", "!/*/", "**/*.mdx"],
-      { timeout },
+      { timeout, env },
     );
-    await exec("git", ["-C", dir, "fetch", "--depth", "1", "origin", docsCommit], { timeout });
-    await exec("git", ["-C", dir, "checkout", docsCommit], { timeout });
+    await exec("git", ["-C", dir, "fetch", "--depth", "1", "origin", docsCommit], { timeout, env });
+    await exec("git", ["-C", dir, "checkout", docsCommit], { timeout, env });
   }
 
   private async build(cloneDir: string, outPath: string): Promise<void> {

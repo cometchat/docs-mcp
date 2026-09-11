@@ -41,21 +41,21 @@ The provided GitHub Actions workflow (`.github/workflows/ci.yml`) already does t
 - Anthropic outbound traffic originates from `160.79.104.0/21`. Allowlist explicitly if a WAF is in front.
 - No inbound auth — docs are public. Per Anthropic's `none` auth-type spec, accept any incoming connection on `/mcp`.
 - DNS rebinding protection is **on by default**. Set `ALLOWED_HOSTS` to the production hostname(s) the server is reachable at (comma-separated, including ports if non-standard, e.g. `mcp.cometchat.com,mcp.cometchat.com:443`). Set `DNS_REBINDING_PROTECTION=false` only if you have an upstream that already validates the `Host` header.
-- Browser-based tooling (MCP Inspector, in-tab clients) needs CORS. Set `ALLOWED_ORIGINS` to the comma-separated origins you want to permit, e.g. `ALLOWED_ORIGINS=https://inspector.modelcontextprotocol.io`. With it unset, the server reflects the request's `Origin` only when DNS-rebinding protection allows it; for a tighter posture in production, always set this explicitly.
+- Browser origins are refused by default. Browsers attach an `Origin` header; native MCP clients (IDEs, CLIs, the SDK, and hosted connectors that call from their own backends, such as Claude's from the range above) send none and are unaffected. A `/mcp` request whose `Origin` is not listed in `ALLOWED_ORIGINS` gets `403`, preflights included, and only listed origins get CORS headers. To use a client that connects straight from a browser page (MCP Inspector in direct mode, an in-tab client), set `ALLOWED_ORIGINS` to its exact origins, comma-separated, e.g. `ALLOWED_ORIGINS=http://localhost:6274`. Matching is exact on scheme, host and port, with no wildcard.
 
 ### Env vars added in 0.1.1
 
 | Env var | Default | Notes |
 |---|---|---|
 | `ALLOWED_HOSTS` | `<HOST>:<PORT>,localhost:<PORT>,127.0.0.1:<PORT>` | Comma-separated `Host` allowlist. |
-| `ALLOWED_ORIGINS` | _unset_ | Comma-separated CORS origin allowlist. |
+| `ALLOWED_ORIGINS` | _unset_ | Comma-separated browser `Origin` allowlist for `/mcp`. Unset allows no browser origin (`403`); requests without an `Origin` are unaffected. |
 | `DNS_REBINDING_PROTECTION` | `true` | Set `false` to disable. |
 | `NODE_ENV` | `development` | `production` enables strict bundle loading (any malformed bundle aborts boot rather than being skipped). |
-| `RATE_LIMIT_ENABLED` | `true` | Per-IP rate limit on `/mcp`. Set `false` for dev or behind an upstream limiter. |
-| `RATE_LIMIT_MAX` | `120` | Max requests per window per IP. |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Window in ms. |
+| `RATE_LIMIT_ENABLED` | `true` | Per-IP rate limit on `/mcp`. Set `false` for dev or behind an upstream limiter. Exactly `true` or `false`; any other value fails startup. |
+| `RATE_LIMIT_MAX` | `120` | Max requests per window per IP. A positive integer: `0` or a non-number fails startup rather than silently switching the limiter off (use `RATE_LIMIT_ENABLED=false`). |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Window in ms. A positive integer. |
 
-The limiter reads the client IP from `X-Forwarded-For` (first hop) when present, otherwise from the socket. In a multi-replica deploy each replica keeps its own counter — for global limits, terminate at the LB or front the replicas with a shared limiter.
+The limiter reads the client IP from the rightmost `X-Forwarded-For` hop when present, otherwise from the socket. That hop is the one our own proxy appends, so a client cannot forge it; this assumes exactly one trusted proxy in front (see the client-IP note under analytics below). In a multi-replica deploy each replica keeps its own counter — for global limits, terminate at the LB or front the replicas with a shared limiter.
 
 ## Health
 

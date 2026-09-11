@@ -226,11 +226,11 @@ docs-mcp/
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `NODE_ENV` | `development` | `production` makes bundle loading strict — a malformed bundle aborts boot instead of being skipped |
 | `ALLOWED_HOSTS` | `<HOST>:<PORT>,localhost:<PORT>,127.0.0.1:<PORT>` | Comma-separated `Host` header allowlist for DNS-rebinding protection |
-| `ALLOWED_ORIGINS` | _unset_ | Comma-separated CORS origin allowlist |
+| `ALLOWED_ORIGINS` | _unset_ | Comma-separated browser `Origin` allowlist for `/mcp`. Unset allows none: a request with an `Origin` gets `403`. Clients that send no `Origin` (IDEs, CLIs, hosted connectors) are unaffected |
 | `DNS_REBINDING_PROTECTION` | `true` | Set `false` only if an upstream already validates `Host` |
-| `RATE_LIMIT_ENABLED` | `true` | Set `false` to disable per-IP rate limiting on `/mcp` |
-| `RATE_LIMIT_MAX` | `120` | Max requests per window per IP |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window in ms |
+| `RATE_LIMIT_ENABLED` | `true` | Set `false` to disable per-IP rate limiting on `/mcp`. Exactly `true` or `false`; other values fail startup |
+| `RATE_LIMIT_MAX` | `120` | Max requests per window per IP. Positive integer; `0` fails startup (disable with `RATE_LIMIT_ENABLED=false`) |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window in ms. Positive integer |
 | `INDEX_AUTO_REFRESH` | `false` | Set `true` to rebuild the search index in-container when `cometchat/docs` changes. Requires `git` in the image and a writable `INDEX_WORK_DIR`. |
 | `INDEX_POLL_INTERVAL_MS` | `600000` | How often to check the docs repo for a new commit (a `git ls-remote`, ~1s) |
 | `INDEX_WORK_DIR` | `./data/generations` | Where rebuilt index generations are written (tmpfs in production) |

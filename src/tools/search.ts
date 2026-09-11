@@ -9,7 +9,7 @@ export const SEARCH_TOOL_DEFINITION = {
   name: SEARCH_TOOL_NAME,
   title: "Search CometChat Documentation",
   description:
-    "Searches CometChat documentation including SDK guides (JavaScript, React, iOS, Android, Flutter, React Native), UI Kit references, REST API documentation, integration tutorials, and OpenAPI specs. Returns ranked snippets with titles and direct links to source pages. Supports an optional `version` filter to scope results to a specific documentation version.",
+    "Searches CometChat documentation including SDK guides (JavaScript, React, iOS, Android, Flutter, React Native), UI Kit references, REST API documentation, integration tutorials, and OpenAPI specs. Returns ranked snippets with titles and direct links to source pages. Pages for the current version of each SDK and UI Kit are preferred over older versions, and each result reports its version label and whether it is current. To reach older docs, pass the `version` filter with that version's label.",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -19,7 +19,8 @@ export const SEARCH_TOOL_DEFINITION = {
       },
       version: {
         type: "string",
-        description: "Optional documentation version filter, e.g. 'v4' or 'v3'.",
+        description:
+          "Optional version label from the docs version picker, e.g. 'v7' or 'v5'. Each SDK and UI Kit numbers its versions independently, so a label matches every product that uses it. Omit to search all versions, with current versions preferred.",
       },
       limit: {
         type: "number",
@@ -44,8 +45,16 @@ export const SEARCH_TOOL_DEFINITION = {
             url: { type: "string", description: "Direct link to the source page." },
             snippet: { type: "string", description: "Matched excerpt with context." },
             section: { type: "string", description: "Documentation section the page belongs to." },
+            version: {
+              type: "string",
+              description: "Version label of the page's SDK or UI Kit, e.g. 'v7'. Omitted for pages that are not versioned.",
+            },
+            isCurrent: {
+              type: "boolean",
+              description: "False when the page documents an older version of its SDK or UI Kit.",
+            },
           },
-          required: ["title", "url", "snippet", "section"],
+          required: ["title", "url", "snippet", "section", "isCurrent"],
           additionalProperties: false,
         },
       },

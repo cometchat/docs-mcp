@@ -30,6 +30,15 @@ const ConfigSchema = z.object({
   docsCommitPin: z.string().optional(),
   /** Unlocks the diagnostic fields on /health. Unset = never released. */
   healthDetailToken: z.string().optional(),
+  // Per-IP rate limit on /mcp. Validated here so a bad value stops startup:
+  // parsed ad hoc, a non-numeric max silently disabled the limiter and a
+  // non-numeric window made every bucket's reset time NaN (a permanent 429).
+  rateLimitEnabled: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  rateLimitMax: z.coerce.number().int().positive().default(120),
+  rateLimitWindowMs: z.coerce.number().int().positive().default(60_000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -56,5 +65,8 @@ export function loadConfig(): Config {
     docsRef: env("DOCS_REF"),
     docsCommitPin: env("DOCS_COMMIT_PIN"),
     healthDetailToken: env("HEALTH_DETAIL_TOKEN"),
+    rateLimitEnabled: env("RATE_LIMIT_ENABLED"),
+    rateLimitMax: env("RATE_LIMIT_MAX"),
+    rateLimitWindowMs: env("RATE_LIMIT_WINDOW_MS"),
   });
 }

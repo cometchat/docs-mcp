@@ -13,16 +13,19 @@
  *   3. a rejected commit is remembered, so the poller does not rebuild it
  *   4. a docs page with executable (`---js`) frontmatter cannot run code or
  *      leak the server's environment during the in-container rebuild
+ *   5. a git location inherited from a hook (GIT_DIR, GIT_INDEX_FILE) is
+ *      ignored, so running this from a worktree hook cannot touch that repo
  *
  * Usage: npx tsx scripts/verify-index-refresh.ts
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { SqliteSearchClient } from "../src/search/sqlite.js";
 import { IndexRefresher } from "../src/index/refresher.js";
+import { withoutGitRepoEnv } from "../src/lib/git-env.js";
 
 const root = mkdtempSync(path.join(tmpdir(), "verify-refresh-"));
 const repo = path.join(root, "docs-origin");
@@ -30,7 +33,7 @@ const work = path.join(root, "generations");
 const seedIndex = path.join(root, "seed.sqlite");
 
 const git = (args: string[], cwd = repo) =>
-  execFileSync("git", args, { cwd, stdio: "pipe", encoding: "utf8" });
+  execFileSync("git", args, { cwd, stdio: "pipe", encoding: "utf8", env: withoutGitRepoEnv() });
 
 function page(name: string, body: string): string {
   // Body must clear the builder's 40-character minimum (build-index.ts skips
@@ -69,7 +72,7 @@ function commit(msg: string): string {
 
 function buildIndex(from: string, out: string): void {
   execFileSync("npx", ["tsx", "scripts/build-index.ts"], {
-    env: { ...process.env, DOCS_REPO: from, INDEX_PATH: out },
+    env: { ...withoutGitRepoEnv(), DOCS_REPO: from, INDEX_PATH: out },
     stdio: "pipe",
   });
 }
@@ -339,7 +342,7 @@ async function main() {
     // returns stdout only, which would silently pass the "was it reported"
     // check no matter what the builder printed.
     const built = spawnSync("npx", ["tsx", "scripts/build-index.ts"], {
-      env: { ...process.env, DOCS_REPO: hostileRepo, INDEX_PATH: hostileOut, SECRET_CANARY: canary },
+      env: { ...withoutGitRepoEnv(), DOCS_REPO: hostileRepo, INDEX_PATH: hostileOut, SECRET_CANARY: canary },
       encoding: "utf8",
     });
     const combined = (built.stdout ?? "") + (built.stderr ?? "");
@@ -371,6 +374,76 @@ async function main() {
         "expected a warning naming the skipped page",
       );
     });
+  }
+
+  // --- a hook's git location must not leak into our git commands ----------
+  // Git exports GIT_DIR and GIT_INDEX_FILE to hooks, as absolute paths inside a
+  // linked worktree. Inherited by child git processes they redirect every one
+  // of them at the committing repository: run from a worktree's pre-commit hook,
+  // this script once rewrote that worktree's HEAD and index and set core.bare.
+  {
+    console.log("\nverify-index-refresh: inherited GIT_DIR / GIT_INDEX_FILE are ignored");
+    const decoy = path.join(root, "decoy");
+    mkdirSync(decoy, { recursive: true });
+    git(["init", "-q", "-b", "main"], decoy);
+    writeFileSync(path.join(decoy, "keep.txt"), "decoy\n");
+    git(["add", "-A"], decoy);
+    git(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "decoy"], decoy);
+    const decoyHead = git(["rev-parse", "HEAD"], decoy).trim();
+    const decoyConfig = readFileSync(path.join(decoy, ".git", "config"), "utf8");
+
+    const leakRepo = path.join(root, "docs-leak");
+    const leakWork = path.join(root, "leak-generations");
+    mkdirSync(leakRepo, { recursive: true });
+    const leakClient = new SqliteSearchClient(seedIndex);
+    const saved = { GIT_DIR: process.env.GIT_DIR, GIT_INDEX_FILE: process.env.GIT_INDEX_FILE };
+    process.env.GIT_DIR = path.join(decoy, ".git");
+    process.env.GIT_INDEX_FILE = path.join(decoy, ".git", "index");
+    let leakCommit = "";
+    try {
+      git(["init", "-q", "-b", "main"], leakRepo);
+      for (let i = 0; i < 12; i++) {
+        writeFileSync(path.join(leakRepo, `leak-${i}.mdx`), page(`Leak ${i}`, `leakcheck chat content ${i}`));
+      }
+      git(["add", "-A"], leakRepo);
+      git(
+        ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "leak"],
+        leakRepo,
+      );
+      leakCommit = git(["rev-parse", "HEAD"], leakRepo).trim();
+      const leakRefresher = new IndexRefresher({
+        searchClient: leakClient,
+        repoUrl: leakRepo,
+        ref: "main",
+        workDir: leakWork,
+        pollIntervalMs: 3_600_000,
+        keepGenerations: 2,
+        policy: { minPages: 5, maxDropRatio: 0.9 },
+        // The default smoke queries ("chat", "message") would revert this
+        // fixture, whose pages never say "message".
+        smokeQueries: ["leakcheck"],
+      });
+      await leakRefresher.tick();
+      await leakRefresher.stop();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+
+    await check("fixture commits land in the throwaway repo, not the inherited GIT_DIR", () => {
+      assert.match(leakCommit, /^[0-9a-f]{40}$/);
+      assert.equal(git(["rev-parse", "HEAD"], decoy).trim(), decoyHead, "decoy HEAD moved");
+    });
+    await check("the inherited repository's config is untouched (no core.bare flip)", () => {
+      assert.equal(readFileSync(path.join(decoy, ".git", "config"), "utf8"), decoyConfig);
+    });
+    await check("the refresher still cloned and built from the throwaway repo", async () => {
+      const r = await leakClient.search("leakcheck", { limit: 5 });
+      assert.ok(r.results.length > 0, "expected the leak repo's pages to be served");
+    });
+    leakClient.close();
   }
 
   await refresher.stop();

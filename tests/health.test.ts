@@ -22,7 +22,7 @@ const req = (opts: { header?: string; query?: string } = {}): Request =>
   }) as unknown as Request;
 
 describe("refreshView — public payload", () => {
-  const view = refreshView(failing, false) as Record<string, unknown>;
+  const view = refreshView(failing, false) as unknown as Record<string, unknown>;
 
   it("exposes the freshness facts a monitor needs", () => {
     expect(view.docsCommit).toBe(failing.docsCommit);
@@ -43,13 +43,13 @@ describe("refreshView — public payload", () => {
 
   it("still signals that refreshing is broken, without the detail", () => {
     expect(view.lastRefreshOk).toBe(false);
-    expect((refreshView(healthy, false) as Record<string, unknown>).lastRefreshOk).toBe(true);
+    expect((refreshView(healthy, false) as unknown as Record<string, unknown>).lastRefreshOk).toBe(true);
   });
 });
 
 describe("refreshView — detailed payload", () => {
   it("includes lastError and poisoned when authorised", () => {
-    const v = refreshView(failing, true) as Record<string, unknown>;
+    const v = refreshView(failing, true) as unknown as Record<string, unknown>;
     expect(v.lastError).toContain("EACCES");
     expect(v.poisoned).toBe(3);
     expect(v.lastRefreshOk).toBe(false);
