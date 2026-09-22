@@ -2,6 +2,8 @@
 
 # CometChat MCP Server
 
+[![MCP Queen operational grade](https://mcpqueen.com/badge/io.github.cometchat/docs-mcp.svg)](https://mcpqueen.com/s/io.github.cometchat/docs-mcp)
+
 **Add real-time chat, voice, video, and moderation to your app through your AI coding agent.**
 
 [![CI](https://github.com/cometchat/docs-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/cometchat/docs-mcp/actions/workflows/ci.yml)
