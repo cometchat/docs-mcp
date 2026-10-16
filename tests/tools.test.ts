@@ -11,7 +11,7 @@ import {
   runBundle,
 } from "../src/tools/bundle.js";
 import { FETCH_TOOL_DEFINITION } from "../src/tools/fetch.js";
-import { BundleStore } from "../src/bundles/loader.js";
+import { stubBundleStore } from "./helpers/bundles.js";
 import {
   ValidationError,
   UnknownBundleError,
@@ -20,7 +20,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const bundlesDir = path.resolve(here, "../bundles");
 
 describe("tool definitions", () => {
   it("expose title + readOnlyHint annotations", () => {
@@ -79,17 +78,17 @@ describe("runSearch input validation", () => {
 
 describe("runBundle", () => {
   it("returns the bundle for a known name", async () => {
-    const store = await BundleStore.load(bundlesDir);
-    const r = runBundle({ bundle: "react-uikit-quickstart" }, store);
+    const store = stubBundleStore();
+    const r = await runBundle({ bundle: "react-uikit-quickstart" }, store);
     expect(r.bundle).toBe("react-uikit-quickstart");
     expect(r.framework).toBe("react");
     expect(r.content.length).toBeGreaterThan(100);
   });
 
   it("throws UnknownBundleError listing all available bundles", async () => {
-    const store = await BundleStore.load(bundlesDir);
+    const store = stubBundleStore();
     try {
-      runBundle({ bundle: "does-not-exist" }, store);
+      await runBundle({ bundle: "does-not-exist" }, store);
       throw new Error("expected throw");
     } catch (err) {
       expect(err).toBeInstanceOf(UnknownBundleError);
@@ -99,7 +98,7 @@ describe("runBundle", () => {
   });
 
   it("rejects malformed bundle name", async () => {
-    const store = await BundleStore.load(bundlesDir);
-    expect(() => runBundle({ bundle: "Bad Name!" }, store)).toThrow(ValidationError);
+    const store = stubBundleStore();
+    await expect(runBundle({ bundle: "Bad Name!" }, store)).rejects.toThrow(ValidationError);
   });
 });

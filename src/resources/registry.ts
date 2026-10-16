@@ -50,31 +50,34 @@ export class ResourceRegistry {
       },
     ];
     for (const name of this.bundles.list()) {
-      const b = this.bundles.get(name)!;
+      const b = this.bundles.spec(name)!;
       out.push({
         uri: `${BUNDLE_URI_PREFIX}${name}`,
         name,
-        description: `${b.title} — ${b.framework}. Implementation bundle: prerequisites, install, configuration, working code.`,
+        description: `${b.title} — ${b.framework}. Implementation bundle: the current documentation pages for this integration, compiled into one document.`,
         mimeType: "text/markdown",
       });
     }
     return out;
   }
 
-  read(uri: string): ResourceContents | null {
+  async read(uri: string): Promise<ResourceContents | null> {
     if (uri === SKILL_URI) {
       return { uri, mimeType: "text/markdown", text: this.skillText };
     }
     if (uri.startsWith(BUNDLE_URI_PREFIX)) {
       const name = uri.slice(BUNDLE_URI_PREFIX.length);
-      const b = this.bundles.get(name);
+      const b = await this.bundles.get(name);
       if (!b) return null;
+      // JSON strings are valid YAML double-quoted scalars, so quotes and line
+      // breaks in a title cannot break the frontmatter.
+      const q = (v: string) => JSON.stringify(v);
       const text = `---
-title: ${b.title}
-framework: ${b.framework}
-last_verified: ${b.last_verified}
+title: ${q(b.title)}
+framework: ${q(b.framework)}
+last_verified: ${q(b.last_verified)}
 prerequisites:
-${b.prerequisites.map((p) => `  - "${p}"`).join("\n")}
+${b.prerequisites.map((p) => `  - ${q(p)}`).join("\n")}
 ---
 
 ${b.content}`;

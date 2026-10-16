@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createApp, type AppDeps } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
 import { SqliteSearchClient } from "../src/search/sqlite.js";
-import { BundleStore } from "../src/bundles/loader.js";
+import { stubBundleStore } from "./helpers/bundles.js";
 import { ResourceRegistry } from "../src/resources/registry.js";
 
 // Drives the real Express app over a real socket. Hermetic: loopback only,
@@ -94,7 +94,7 @@ const toolsList = { jsonrpc: "2.0", id: 2, method: "tools/list" };
 const initialized = { jsonrpc: "2.0", method: "notifications/initialized" };
 
 beforeAll(async () => {
-  const bundleStore = await BundleStore.load(path.join(ROOT, "bundles"));
+  const bundleStore = stubBundleStore();
   base = {
     searchClient: new SqliteSearchClient(path.join(ROOT, "does-not-exist", "index.sqlite")),
     bundleStore,
@@ -357,7 +357,11 @@ describe("/mcp — browser origins", () => {
       path: "/health",
       headers: { origin: "https://evil.example" },
     });
-    expect(JSON.parse(r.body).service).toBe("cometchat-mcp");
+    const body = JSON.parse(r.body);
+    expect(body.service).toBe("cometchat-mcp");
+    // The manifest count, and how many are cached from a complete build (none yet).
+    expect(body.bundles).toBe(11);
+    expect(body.bundlesReady).toBe(0);
     expect(r.headers).not.toHaveProperty("access-control-allow-origin");
   });
 });

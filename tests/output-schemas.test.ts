@@ -11,7 +11,8 @@ import { FETCH_TOOL_DEFINITION, runFetch } from "../src/tools/fetch.js";
 import { BUNDLE_TOOL_DEFINITION, runBundle } from "../src/tools/bundle.js";
 import { LIST_BUNDLES_TOOL_DEFINITION, runListBundles } from "../src/tools/list-bundles.js";
 import { SqliteSearchClient } from "../src/search/sqlite.js";
-import { BundleStore } from "../src/bundles/loader.js";
+import { stubBundleStore } from "./helpers/bundles.js";
+import type { BundleStore } from "../src/bundles/loader.js";
 
 // Every run* return value must conform to its declared outputSchema: SDK
 // clients validate structuredContent against the schema and throw on
@@ -19,7 +20,6 @@ import { BundleStore } from "../src/bundles/loader.js";
 // outage for validating clients. This suite is the server-side guard.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const bundlesDir = path.resolve(here, "../bundles");
 
 const ajv = new Ajv({ strict: false });
 
@@ -67,7 +67,7 @@ describe("tool outputs conform to declared outputSchema", () => {
     ).run("/x", "https://example.com/x", "Presence indicators", "sdk", null, "Presence indicators and typing events for chat apps.");
     db.close();
     searchClient = new SqliteSearchClient(indexPath);
-    store = await BundleStore.load(bundlesDir);
+    store = stubBundleStore();
 
     httpServer = createServer((_req, res) => {
       res.writeHead(200, { "content-type": "text/markdown" });
@@ -94,8 +94,8 @@ describe("tool outputs conform to declared outputSchema", () => {
     assertConforms(FETCH_TOOL_DEFINITION.outputSchema, result, "runFetch");
   });
 
-  it("get_cometchat_implementation_bundle", () => {
-    const result = runBundle({ bundle: "react-uikit-quickstart" }, store);
+  it("get_cometchat_implementation_bundle", async () => {
+    const result = await runBundle({ bundle: "react-uikit-quickstart" }, store);
     assertConforms(BUNDLE_TOOL_DEFINITION.outputSchema, result, "runBundle");
   });
 

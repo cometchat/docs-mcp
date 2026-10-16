@@ -1,4 +1,5 @@
 import type { BundleStore } from "../bundles/loader.js";
+import { BUNDLES_REVIEWED } from "../bundles/manifest.js";
 
 export const LIST_BUNDLES_TOOL_NAME = "list_cometchat_bundles";
 
@@ -24,7 +25,7 @@ export const LIST_BUNDLES_TOOL_DEFINITION = {
             bundle: { type: "string", description: "Bundle identifier to pass to get_cometchat_implementation_bundle." },
             title: { type: "string", description: "Human-readable bundle title." },
             framework: { type: "string", description: "Target framework/platform." },
-            last_verified: { type: "string", description: "Date the bundle was last verified against live SDK versions." },
+            last_verified: { type: "string", description: "Date this bundle's list of documentation pages was last reviewed." },
           },
           required: ["bundle", "title", "framework", "last_verified"],
           additionalProperties: false,
@@ -45,13 +46,13 @@ export function runListBundles(store: BundleStore) {
   const bundles = store
     .list()
     .map((name) => {
-      const b = store.get(name);
+      const b = store.spec(name);
       if (!b) return undefined;
       return {
         bundle: b.name,
         title: b.title,
         framework: b.framework,
-        last_verified: b.last_verified,
+        last_verified: BUNDLES_REVIEWED,
       };
     })
     .filter((b): b is NonNullable<typeof b> => b !== undefined)

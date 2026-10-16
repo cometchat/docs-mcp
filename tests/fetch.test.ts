@@ -248,6 +248,50 @@ describe("runFetch redirects", () => {
     expect(calls).toBe(2);
   });
 
+  it("times out a page whose body stalls after the headers arrive", async () => {
+    globalThis.fetch = vi.fn((_input: unknown, init?: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("# Slow\n"));
+          init?.signal?.addEventListener("abort", () =>
+            controller.error(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 200 }));
+    }) as any;
+    const started = Date.now();
+    await expect(runFetch({ path: "/slow-body" }, { docsBaseUrl: BASE, timeoutMs: 150 })).rejects.toBeInstanceOf(
+      BackendError,
+    );
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
+
+  it("reports a 404 as not found at once, without reading a body that stalls", async () => {
+    globalThis.fetch = vi.fn((_input: unknown, init?: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () =>
+            controller.error(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 404 }));
+    }) as any;
+    const started = Date.now();
+    await expect(runFetch({ path: "/gone" }, { docsBaseUrl: BASE, timeoutMs: 1000 })).rejects.toBeInstanceOf(NotFoundError);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("cuts a page at 50 KB by default, and not when the caller lifts the limit", async () => {
+    const page = "# Big\n\n" + Array.from({ length: 3000 }, (_, i) => `Paragraph ${i} ${"q".repeat(20)}`).join("\n\n");
+    globalThis.fetch = vi.fn(async () => new Response(page, { status: 200 })) as any;
+    const cut = await runFetch({ path: "/big" }, opts);
+    expect(cut.content).toContain("[Content truncated");
+    const whole = await runFetch({ path: "/big" }, opts, { maxBytes: Infinity });
+    expect(whole.content).toBe(page);
+  });
+
   it("logs a refused off-site redirect but not the ordinary docs-root one", async () => {
     const info = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
     try {

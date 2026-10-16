@@ -6,11 +6,9 @@ const ConfigSchema = z.object({
   host: z.string().default("0.0.0.0"),
   docsBaseUrl: z.string().url().default("https://www.cometchat.com/docs"),
   indexPath: z.string().default("./data/index.sqlite"),
-  bundlesDir: z.string().default("./bundles"),
   skillsDir: z.string().default("./skills"),
   fetchTimeoutMs: z.coerce.number().int().positive().default(5000),
   logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
-  nodeEnv: z.enum(["development", "production", "test"]).default("development"),
   // In-container index refresh (opt-in: local dev and stdio are unaffected).
   indexAutoRefresh: z
     .string()
@@ -48,11 +46,9 @@ export function loadConfig(): Config {
     host: env("HOST"),
     docsBaseUrl: env("DOCS_BASE_URL"),
     indexPath: env("INDEX_PATH"),
-    bundlesDir: env("BUNDLES_DIR"),
     skillsDir: env("SKILLS_DIR"),
     fetchTimeoutMs: env("FETCH_TIMEOUT_MS"),
     logLevel: env("LOG_LEVEL"),
-    nodeEnv: env("NODE_ENV"),
     indexAutoRefresh: env("INDEX_AUTO_REFRESH"),
     indexPollIntervalMs: env("INDEX_POLL_INTERVAL_MS"),
     indexWorkDir: env("INDEX_WORK_DIR"),

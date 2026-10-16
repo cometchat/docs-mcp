@@ -22,7 +22,6 @@ COPY package.json package-lock.json tsconfig.json ./
 RUN npm ci --no-audit --no-fund
 COPY src ./src
 COPY scripts ./scripts
-COPY bundles ./bundles
 COPY skills ./skills
 RUN npm run build
 # The runtime stage copies this node_modules, so drop devDependencies now that
@@ -38,7 +37,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/bundles ./bundles
 COPY --from=build /app/skills ./skills
 COPY --from=build /app/scripts ./scripts
 # scripts/build-index.ts runs under tsx both here (baking the index) and at

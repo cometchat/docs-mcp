@@ -14,7 +14,7 @@
       "name": "cometchat",
       "source": "./",
       "displayName": "CometChat",
-      "description": "Add real-time chat, voice, video, and moderation to your app. Claude reads CometChat documentation, fetches reference pages, and pulls curated implementation bundles for React, React Native, Flutter, iOS, Android, the JavaScript SDK, the no-code widget, moderation, multi-tenant chat, and presence. Read-only, no authentication required.",
+      "description": "Add real-time chat, voice, video, and moderation to your app. Claude reads CometChat documentation, fetches reference pages, and pulls implementation bundles built from the current docs for React, Angular, React Native, Flutter, iOS, Android, the JavaScript SDK, the no-code widget, moderation, multi-tenant chat, and presence. Read-only, no authentication required.",
       "version": "0.1.6",
       "author": {
         "name": "CometChat",

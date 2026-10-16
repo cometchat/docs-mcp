@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "lint": "tsc -p tsconfig.check.json",
     "verify:refresh": "tsx scripts/verify-index-refresh.ts",
+    "verify:bundles": "tsx scripts/verify-bundles.ts",
     "check": "npm run lint && npm test && npm run verify:refresh",
     "hooks:install": "git config core.hooksPath .githooks && echo 'pre-commit hook enabled (.githooks)'",
     "inspect": "npx @modelcontextprotocol/inspector"

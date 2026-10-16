@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BundleStore } from "../src/bundles/loader.js";
+import { stubBundleStore } from "./helpers/bundles.js";
 import {
   LIST_BUNDLES_TOOL_DEFINITION,
   runListBundles,
@@ -10,15 +10,9 @@ import { SEARCH_TOOL_DEFINITION } from "../src/tools/search.js";
 import { FETCH_TOOL_DEFINITION } from "../src/tools/fetch.js";
 import { BUNDLE_TOOL_DEFINITION } from "../src/tools/bundle.js";
 
-const bundlesDir = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "bundles",
-);
-
 describe("list_cometchat_bundles", () => {
   it("returns every bundle with summary fields, sorted by identifier", async () => {
-    const store = await BundleStore.load(bundlesDir);
+    const store = stubBundleStore();
     const result = runListBundles(store);
     expect(result.total).toBe(store.list().length);
     expect(result.total).toBeGreaterThanOrEqual(10);

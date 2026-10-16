@@ -118,7 +118,8 @@ export function createApp(deps: AppDeps): Express {
     const indexReady = searchClient.isReady();
     const indexAgeSeconds = searchClient.indexAgeSeconds();
     const bundleCount = bundleStore.list().length;
-    const ok = indexReady && bundleCount > 0;
+    // Bundles are read from the docs on demand, so only the index gates readiness.
+    const ok = indexReady;
     res.status(ok ? 200 : 503).json({
       status: ok ? "ok" : "degraded",
       service: "cometchat-mcp",
@@ -126,6 +127,9 @@ export function createApp(deps: AppDeps): Express {
       indexReady,
       indexAgeSeconds,
       bundles: bundleCount,
+      // Bundles are built on first use: this counts those cached with every
+      // listed page in them (0 after a restart until they are asked for).
+      bundlesReady: bundleStore.readyCount(),
       ...(refresher
         ? {
             indexRefresh: refreshView(

@@ -35,12 +35,13 @@ Reference shape: Clerk's listing.
   3. "Show me how to add presence indicators on iOS." → expect search + bundle (`presence-and-typing`) interplay.
   4. "Walk me through multi-tenant chat." → expect `get_cometchat_implementation_bundle` for `multi-tenant-chat`.
   5. "What's the rate limit for sending a message?" → expect `search_cometchat_docs` returning the rate-limits page.
-- Available bundles (10):
+- Available bundles (11; each compiled from the current docs pages):
   - `react-uikit-quickstart`
   - `react-native-uikit-quickstart`
   - `flutter-uikit-quickstart`
   - `ios-uikit-quickstart`
   - `android-uikit-quickstart`
+  - `angular-uikit-quickstart`
   - `js-sdk-messaging-basics`
   - `widget-embed`
   - `moderation-setup`

@@ -13,7 +13,8 @@ docker run --rm -p 3000:3000 \
   cometchat-mcp:0.1.6
 ```
 
-The image bundles `bundles/`, `skills/`, and the compiled server. The SQLite
+The image bundles `skills/` and the compiled server. Implementation bundles
+are compiled from live docs pages on request (src/bundles/manifest.ts). The SQLite
 index is **not** bundled — mount it at `/app/data` or build it inside the
 container before launch (see "Index build" below). The server still boots
 without the index; `/health` will report `degraded` and the search tool will
@@ -50,7 +51,7 @@ The provided GitHub Actions workflow (`.github/workflows/ci.yml`) already does t
 | `ALLOWED_HOSTS` | `<HOST>:<PORT>,localhost:<PORT>,127.0.0.1:<PORT>` | Comma-separated `Host` allowlist. |
 | `ALLOWED_ORIGINS` | _unset_ | Comma-separated browser `Origin` allowlist for `/mcp`. Unset allows no browser origin (`403`); requests without an `Origin` are unaffected. |
 | `DNS_REBINDING_PROTECTION` | `true` | Set `false` to disable. |
-| `NODE_ENV` | `development` | `production` enables strict bundle loading (any malformed bundle aborts boot rather than being skipped). |
+| `NODE_ENV` | `development` | Standard Node.js setting (Express production mode); set `production` in containers. |
 | `RATE_LIMIT_ENABLED` | `true` | Per-IP rate limit on `/mcp`. Set `false` for dev or behind an upstream limiter. Exactly `true` or `false`; any other value fails startup. |
 | `RATE_LIMIT_MAX` | `120` | Max requests per window per IP. A positive integer: `0` or a non-number fails startup rather than silently switching the limiter off (use `RATE_LIMIT_ENABLED=false`). |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Window in ms. A positive integer. |
@@ -59,8 +60,8 @@ The limiter reads the client IP from the rightmost `X-Forwarded-For` hop when pr
 
 ## Health
 
-- `GET /health` → `200 { status: "ok", indexReady: true, indexAgeSeconds: N, bundles: 10 }` when the SQLite index exists and at least one bundle loaded. (There is no `sessions` count: the server is stateless — see "Sessions".)
-- `GET /health` → `503 { status: "degraded", indexReady: false, indexAgeSeconds: null, ... }` when the index is missing or the bundle store is empty. Use this for readiness gating: a container without an index should be marked not-ready so the load balancer doesn't route to it.
+- `GET /health` → `200 { status: "ok", indexReady: true, indexAgeSeconds: N, bundles: 11, bundlesReady: N }` when the SQLite index exists. `bundles` counts the manifest; `bundlesReady` counts bundles cached with every listed page in them; a bundle missing a deleted page is still served but not counted. Bundles are built on first use, so it starts at 0 after a restart. A docs outage doesn't change readiness: cached bundles keep being served. (There is no `sessions` count: the server is stateless — see "Sessions".)
+- `GET /health` → `503 { status: "degraded", indexReady: false, indexAgeSeconds: null, ... }` when the index is missing. Use this for readiness gating: a container without an index should be marked not-ready so the load balancer doesn't route to it.
 - `indexAgeSeconds` is the file mtime of the SQLite index. The daily-rebuild cadence above means a healthy production should always be under ~26 hours (~94000s). Alert above that.
 
 ## Sessions

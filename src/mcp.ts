@@ -42,7 +42,7 @@ export const SERVER_NAME = "CometChat Docs";
 export const SERVER_VERSION = readPackageVersion();
 
 export const SERVER_INSTRUCTIONS =
-  "Use this server to integrate CometChat — real-time chat, voice/video, and moderation — into web and mobile apps. Read the cometchat://skills/overview resource first for orientation. Use search_cometchat_docs for conceptual queries, fetch_cometchat_doc_page to read a specific page, and get_cometchat_implementation_bundle for ready-to-use recipes (React, React Native, Flutter, iOS, Android, JavaScript SDK, widget, moderation, multi-tenant, presence). Call list_cometchat_bundles to discover which bundles exist.";
+  "Use this server to integrate CometChat — real-time chat, voice/video, and moderation — into web and mobile apps. Read the cometchat://skills/overview resource first for orientation. Use search_cometchat_docs for conceptual queries, fetch_cometchat_doc_page to read a specific page, and get_cometchat_implementation_bundle for ready-to-use recipes (React, Angular, React Native, Flutter, iOS, Android, JavaScript SDK, widget, moderation, multi-tenant, presence). Call list_cometchat_bundles to discover which bundles exist.";
 
 export interface McpServerDeps {
   config: Config;
@@ -77,6 +77,9 @@ export function buildMcpServer(deps: McpServerDeps): Server {
     {
       capabilities: {
         tools: { listChanged: false },
+        // False is accurate: the resource list is fixed (the skill overview and
+        // one entry per manifest bundle), and this stateless server has no
+        // session to notify anyway.
         resources: { listChanged: false },
       },
       instructions: SERVER_INSTRUCTIONS,
@@ -98,7 +101,13 @@ export function buildMcpServer(deps: McpServerDeps): Server {
 
   server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
     const uri = req.params.uri;
-    const found = resources.read(uri);
+    let found;
+    try {
+      found = await resources.read(uri);
+    } catch (err) {
+      logger.warn({ uri, err: (err as Error).message }, "resource_read_failed");
+      throw err;
+    }
     if (!found) {
       throw new Error(`Resource not found: ${uri}`);
     }
@@ -139,7 +148,7 @@ export function buildMcpServer(deps: McpServerDeps): Server {
           });
           break;
         case BUNDLE_TOOL_NAME:
-          result = runBundle(args, bundleStore);
+          result = await runBundle(args, bundleStore);
           break;
         case LIST_BUNDLES_TOOL_NAME:
           result = runListBundles(bundleStore);

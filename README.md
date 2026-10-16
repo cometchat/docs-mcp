@@ -81,8 +81,8 @@ The agent reads CometChat's documentation, pulls the relevant implementation bun
 
 - `search_cometchat_docs` — Search across SDK guides, UI Kit references, REST API documentation, and OpenAPI specs. Returns ranked snippets with titles + direct links. Optional `version` filter.
 - `fetch_cometchat_doc_page` — Fetch the full content of any documentation page as markdown by URL or relative path.
-- `get_cometchat_implementation_bundle` — Return a curated implementation bundle for a named scenario — prerequisites, install commands, configuration, working code.
-- `list_cometchat_bundles` — List every available implementation bundle (identifier, title, framework, last-verified date) for discovery.
+- `get_cometchat_implementation_bundle` — Return the implementation bundle for a named scenario: the scenario's current docs pages (for a UI Kit: its integration guide, then the platform's AI reference page) compiled into one document, plus related page paths.
+- `list_cometchat_bundles` — List every available implementation bundle (identifier, title, framework, date its page list was reviewed) for discovery.
 
 All four carry `readOnlyHint: true`, a `title` annotation, and a declared `outputSchema` with structured results. Names are ≤ 64 characters. Descriptions describe contracts only — no behavioral instructions to the agent, no cross-tool routing, no marketing language.
 
@@ -94,12 +94,13 @@ All four carry `readOnlyHint: true`, a `title` annotation, and a declared `outpu
 | `cometchat://bundles/react-uikit-quickstart` | React UI Kit install + init + login + chat surface |
 | `cometchat://bundles/react-native-uikit-quickstart` | React Native UI Kit with navigation and chat screen |
 | `cometchat://bundles/flutter-uikit-quickstart` | Flutter UI Kit install + init + basic chat |
-| `cometchat://bundles/ios-uikit-quickstart` | iOS UI Kit (SwiftUI) install + chat view |
-| `cometchat://bundles/android-uikit-quickstart` | Android UI Kit (Jetpack Compose) install + chat screen |
+| `cometchat://bundles/ios-uikit-quickstart` | iOS UI Kit install + chat view |
+| `cometchat://bundles/android-uikit-quickstart` | Android UI Kit install + chat screen |
+| `cometchat://bundles/angular-uikit-quickstart` | Angular UI Kit install + init + login + chat surface |
 | `cometchat://bundles/js-sdk-messaging-basics` | Vanilla JS SDK — send/receive text and media messages |
-| `cometchat://bundles/widget-embed` | No-code widget embed for HTML, Squarespace, Webflow, Wix, WordPress, Shopify |
-| `cometchat://bundles/moderation-setup` | AI moderation rules, image moderation, webhooks |
-| `cometchat://bundles/multi-tenant-chat` | Multi-tenant SaaS chat — tenant isolation, server-issued Auth Tokens |
+| `cometchat://bundles/widget-embed` | No-code widget embed for HTML, with pointers to WordPress, Webflow and Squarespace |
+| `cometchat://bundles/moderation-setup` | Moderation getting started, with pointers to rules, lists and flagged messages |
+| `cometchat://bundles/multi-tenant-chat` | Multi-tenancy — isolated apps under one plan, App Management APIs |
 | `cometchat://bundles/presence-and-typing` | Online presence, typing indicators, read receipts |
 
 ---
@@ -108,7 +109,7 @@ All four carry `readOnlyHint: true`, a `title` annotation, and a declared `outpu
 
 1. **You prompt your agent** in natural language.
 2. **The agent reads the orientation skill** (`cometchat://skills/overview`) to understand which tool/bundle fits your request.
-3. **For top scenarios**, the agent pulls a curated implementation bundle — ready-to-run code with prerequisites, install commands, configuration, and working examples.
+3. **For top scenarios**, the agent pulls an implementation bundle — the current docs pages for that integration in one document.
 4. **For long-tail questions**, the agent searches CometChat's docs and reads specific reference pages.
 5. **The agent writes the code** into your project, using the bundle as the source of truth and your project structure as the constraint.
 
@@ -150,12 +151,12 @@ Your agent (Claude / Cursor / Windsurf / …)
         ↓
   ├── search_cometchat_docs     → SQLite FTS5 index of cometchat/docs
   ├── fetch_cometchat_doc_page  → cometchat.com/docs/*.md (first-party)
-  └── get_cometchat_implementation_bundle → bundled markdown recipes
+  └── get_cometchat_implementation_bundle → live docs pages listed in src/bundles/manifest.ts
 ```
 
 - Stateless server, single universal endpoint, no user-specific state.
 - Search index rebuilds from `github.com/cometchat/docs` on every push to that repo's `main` branch.
-- Implementation bundles carry a `last_verified` date and are re-checked against live SDK versions quarterly.
+- Implementation bundles have no content of their own. Each is a list of docs pages (`src/bundles/manifest.ts`), read from the live docs on request, so a docs fix reaches the bundle with no MCP change. A built bundle is served for 10 minutes; after that a call still gets it at once and starts one background rebuild. A rebuild that hits a timeout or 5xx never replaces the cached bundle and is retried with a backoff (30 s, doubling, up to 10 minutes), so a docs outage neither drops bundles nor floods the docs site. A deleted page (404) is what the docs say, so that rebuild is kept and names the missing page. `npm run verify:bundles` fails when a listed page moves, disappears, no longer fits in its bundle, or is no longer the current version in docs.json; the maintainers run it daily.
 
 ---
 
@@ -170,8 +171,11 @@ npm install
 DOCS_REPO=../cometchat-docs-repo npm run build:index
 npm run dev
 
-# Run the test suite (36 tests across validation, truncation, bundles, tools, resources, fetch)
+# Run the test suite
 npm test
+
+# Check every docs page a bundle lists still exists (network)
+npm run verify:bundles
 ```
 
 The server listens on `http://0.0.0.0:3000` by default. Health probe at `GET /health`, MCP endpoint at `POST /mcp`.
@@ -193,11 +197,11 @@ docs-mcp/
 │   ├── server.ts                  # MCP server entry, transport, tool dispatch
 │   ├── tools/{search,fetch,bundle}.ts
 │   ├── search/sqlite.ts           # SQLite FTS5 client
-│   ├── bundles/loader.ts          # markdown bundle store
+│   ├── bundles/manifest.ts        # each bundle's docs pages
+│   ├── bundles/loader.ts          # compiles bundles from live docs pages
 │   ├── resources/registry.ts      # skill + bundle resources
 │   └── lib/{errors,truncate,validation,logger}.ts
 ├── scripts/build-index.ts         # builds SQLite FTS5 index from cometchat/docs
-├── bundles/                       # 10 curated implementation bundles
 ├── skills/overview.md             # agent orientation skill
 ├── tests/                         # vitest suite
 ├── .claude-plugin/
@@ -220,11 +224,10 @@ docs-mcp/
 | `HOST` | `0.0.0.0` | Bind host |
 | `DOCS_BASE_URL` | `https://www.cometchat.com/docs` | Used for URLs in responses + the `.md` fetch fallback |
 | `INDEX_PATH` | `./data/index.sqlite` | SQLite FTS5 index location. Server still boots if missing; search returns `backend_unavailable` and `/health` is `503`. |
-| `BUNDLES_DIR` | `./bundles` | Markdown bundles directory |
 | `SKILLS_DIR` | `./skills` | Orientation skill (`overview.md`) directory |
 | `FETCH_TIMEOUT_MS` | `5000` | Per-fetch HTTP timeout |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
-| `NODE_ENV` | `development` | `production` makes bundle loading strict — a malformed bundle aborts boot instead of being skipped |
+| `NODE_ENV` | `development` | Standard Node.js setting (Express runs in production mode); set `production` in containers |
 | `ALLOWED_HOSTS` | `<HOST>:<PORT>,localhost:<PORT>,127.0.0.1:<PORT>` | Comma-separated `Host` header allowlist for DNS-rebinding protection |
 | `ALLOWED_ORIGINS` | _unset_ | Comma-separated browser `Origin` allowlist for `/mcp`. Unset allows none: a request with an `Origin` gets `403`. Clients that send no `Origin` (IDEs, CLIs, hosted connectors) are unaffected |
 | `DNS_REBINDING_PROTECTION` | `true` | Set `false` only if an upstream already validates `Host` |
@@ -279,8 +282,7 @@ The same server URL is listed across multiple agent marketplaces:
 
 PRs welcome — especially:
 
-- **New implementation bundles** for under-served scenarios (drop a markdown file in `bundles/` with the required frontmatter).
-- **Bundle refreshes** when SDK versions change (`last_verified` date in the bundle's frontmatter triggers a CI warning if older than 6 months).
+- **New implementation bundles**: add an entry to `src/bundles/manifest.ts` listing existing docs pages. If no page covers the scenario, write the page in [`cometchat/docs`](https://github.com/cometchat/docs) first; bundle content always comes from the docs.
 - **Tool improvements** behind the existing read-only contract.
 
 Out of scope today:

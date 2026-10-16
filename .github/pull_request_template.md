@@ -5,7 +5,7 @@ What does this change and why?
 ## Type of change
 
 - [ ] New implementation bundle
-- [ ] Bundle refresh (SDK version update)
+- [ ] Bundle page list change (`src/bundles/manifest.ts`)
 - [ ] Tool / server change (within the read-only contract)
 - [ ] Docs
 - [ ] Other
@@ -15,4 +15,4 @@ What does this change and why?
 - [ ] `npm test` passes
 - [ ] `claude plugin validate . --strict` passes (if manifests changed)
 - [ ] Tools remain read-only (`readOnlyHint: true`); no behavioral instructions in tool descriptions
-- [ ] Updated the `last_verified` frontmatter for any changed bundle
+- [ ] Changed bundle pages: updated `BUNDLES_REVIEWED` in `src/bundles/manifest.ts` and ran `npm run verify:bundles`

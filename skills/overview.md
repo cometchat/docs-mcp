@@ -35,13 +35,14 @@ Reach for this skill when the user wants to:
 
 **Order of operations every time**: `init()` → `login()` → render. Skipping or reversing any step yields a blank screen.
 
-**Key packages:**
+**Key packages** (install the latest release; each implementation bundle carries the install steps from the current docs):
 - JS SDK: `@cometchat/chat-sdk-javascript`
-- React UI Kit: `@cometchat/chat-uikit-react` (peer deps: `react` ≥ 18, `rxjs` ^7.8.1)
+- React UI Kit: `@cometchat/chat-uikit-react` (peer deps: `react` 18–20, `@cometchat/chat-sdk-javascript`, `@cometchat/calls-sdk-javascript`)
+- Angular UI Kit: `@cometchat/chat-uikit-angular` (Angular 17–21)
 - React Native UI Kit: `@cometchat/chat-uikit-react-native` + `@cometchat/chat-sdk-react-native`
 - Flutter UI Kit: `cometchat_chat_uikit` (pub.dev)
 - iOS UI Kit: `CometChatUIKitSwift` (Swift Package Manager)
-- Android UI Kit: `com.cometchat:chat-uikit-android` (Cloudsmith Maven)
+- Android UI Kit: `com.cometchat:chatuikit-compose-android` (Jetpack Compose) or `com.cometchat:chatuikit-kotlin-android` (Views), from Cloudsmith Maven
 - Calls: `@cometchat/calls-sdk-javascript` (or platform-specific calls SDK)
 
 **REST base URL pattern**: `https://{appId}.api-{region}.cometchat.io/v3.0`. Auth via `appID` + `apiKey` headers.
@@ -72,7 +73,7 @@ Reach for this skill when the user wants to:
 ## Common Gotchas
 
 - **Init / login order.** `init()` must resolve before `login()`. `login()` must resolve before rendering UI Kit components. Use a `ready` flag.
-- **Env-var prefix.** Vite needs `VITE_*`, Create React App needs `REACT_APP_*`, RN needs no prefix. The bundles default to Vite-style; rewrite for the user's bundler.
+- **Env-var prefix.** Vite needs `VITE_*`, Create React App needs `REACT_APP_*`, RN needs no prefix. The docs examples default to Vite-style; rewrite for the user's bundler.
 - **Missing CSS / theme imports** in UI Kit projects render unstyled.
 - **Auth Key shipped to production.** Never. Use Auth Tokens minted server-side.
 - **iOS deployment target below 13.0** or **Android `minSdk` below 24** — UI Kits won't link.
@@ -97,6 +98,7 @@ Before reporting an integration as done:
 - Quickstart bundles available via `get_cometchat_implementation_bundle`:
   - `react-uikit-quickstart`
   - `react-native-uikit-quickstart`
+  - `angular-uikit-quickstart`
   - `flutter-uikit-quickstart`
   - `ios-uikit-quickstart`
   - `android-uikit-quickstart`

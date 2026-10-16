@@ -12,9 +12,8 @@ import { buildMcpServer, SERVER_VERSION } from "./mcp.js";
 async function main() {
   const config = loadConfig();
   const searchClient = new SqliteSearchClient(config.indexPath);
-  const bundleStore = await BundleStore.load(config.bundlesDir, {
-    strict: config.nodeEnv === "production",
-  });
+  // Bundles are compiled from live docs pages on request (src/bundles/manifest.ts).
+  const bundleStore = BundleStore.fromDocs({ docsBaseUrl: config.docsBaseUrl, timeoutMs: config.fetchTimeoutMs });
   const resources = await ResourceRegistry.load(config.skillsDir, bundleStore);
 
   const server = buildMcpServer({ config, searchClient, bundleStore, resources });

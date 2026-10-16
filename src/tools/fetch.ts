@@ -64,7 +64,12 @@ type DocsBase = {
   url: string;
 };
 
-export async function runFetch(input: unknown, opts: FetchOpts) {
+export type FetchLimits = {
+  /** Cut the page at a paragraph past this size (default FETCH_MAX_BYTES). The bundle store reads pages whole. */
+  maxBytes?: number;
+};
+
+export async function runFetch(input: unknown, opts: FetchOpts, limits: FetchLimits = {}) {
   let parsed;
   try {
     parsed = FetchInputSchema.parse(input);
@@ -78,7 +83,7 @@ export async function runFetch(input: unknown, opts: FetchOpts) {
 
   const base = parseDocsBase(opts.docsBaseUrl);
   const requestedPath = resolveInputPath(parsed.path, base);
-  const { response, urlPath } = await fetchFollowingRedirects(requestedPath, base, opts.timeoutMs);
+  const { response, text: fullText, urlPath } = await fetchFollowingRedirects(requestedPath, base, opts.timeoutMs);
   const url = `${base.url}${urlPath}`;
 
   if (response.status === 404) {
@@ -89,13 +94,12 @@ export async function runFetch(input: unknown, opts: FetchOpts) {
     throw new BackendError();
   }
 
-  const fullText = await response.text();
   if (looksLikeDocsHomepage(fullText, urlPath)) {
     throw new NotFoundError(requestedPath);
   }
   const title = extractTitle(fullText, urlPath);
   const section = extractSection(urlPath);
-  const safe = truncateAtParagraph(fullText, FETCH_MAX_BYTES, url);
+  const safe = truncateAtParagraph(fullText, limits.maxBytes ?? FETCH_MAX_BYTES, url);
 
   return {
     title,
@@ -110,34 +114,34 @@ export async function runFetch(input: unknown, opts: FetchOpts) {
 // Requests <page>.md and follows redirects by hand. Moved pages 307/308 to
 // their new path, but unknown pages redirect to the docs root, which serves
 // the homepage with 200 — so a redirect is only followed while it lands on
-// another docs page, and every other 3xx is not-found.
+// another docs page, and every other 3xx is not-found. A 2xx body is read
+// before returning, so the timeout covers a page that stalls mid-response too;
+// any other status is returned with its body discarded, so a slow 404 or 5xx
+// body can't turn into a timeout.
 async function fetchFollowingRedirects(
   requestedPath: string,
   base: DocsBase,
   timeoutMs: number,
-): Promise<{ response: Response; urlPath: string }> {
+): Promise<{ response: Response; text: string; urlPath: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     let urlPath = requestedPath;
     for (let hops = 0; ; hops++) {
       const mdUrl = `${base.url}${urlPath}.md`;
-      let response: Response;
-      try {
-        response = await fetch(mdUrl, {
+      const response = await network(mdUrl, () =>
+        fetch(mdUrl, {
           signal: controller.signal,
           redirect: "manual",
           headers: { Accept: "text/markdown, text/plain;q=0.9" },
-        });
-      } catch (err) {
-        if ((err as Error).name === "AbortError") {
-          throw new BackendError("Documentation fetch timed out. Retry shortly.");
-        }
-        logger.error({ err, mdUrl }, "fetch_failed");
-        throw new BackendError();
+        }),
+      );
+      if (response.ok) {
+        return { response, text: await network(mdUrl, () => response.text()), urlPath };
       }
       if (response.status < 300 || response.status >= 400) {
-        return { response, urlPath };
+        response.body?.cancel().catch(() => undefined);
+        return { response, text: "", urlPath };
       }
       response.body?.cancel().catch(() => undefined);
       const location = response.headers.get("location");
@@ -157,6 +161,20 @@ async function fetchFollowingRedirects(
     }
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// The request and the body read fail the same way: the shared timeout aborts
+// both, and anything else is a network failure.
+async function network<T>(mdUrl: string, step: () => Promise<T>): Promise<T> {
+  try {
+    return await step();
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new BackendError("Documentation fetch timed out. Retry shortly.");
+    }
+    logger.error({ err, mdUrl }, "fetch_failed");
+    throw new BackendError();
   }
 }
 

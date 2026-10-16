@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { staleBundlePages } from "../src/bundles/versions.js";
 import {
   indexNavigation,
   resolvePageVersion,
@@ -225,5 +226,52 @@ describe("indexNavigation robustness", () => {
     for (const input of [null, undefined, "docs", 42, []]) {
       expect(indexNavigation(input).pages.size).toBe(0);
     }
+  });
+});
+
+describe("staleBundlePages (verify:bundles)", () => {
+  // Flutter v7 has shipped: v7 is the default at the unversioned paths, v6
+  // moved under /v6/, and the old llms-flutter-v6 page is still published.
+  const nav = indexNavigation({
+    navigation: {
+      products: [
+        {
+          product: "Chat & Messaging",
+          tabs: [
+            {
+              tab: "UI Kits",
+              dropdowns: [
+                {
+                  dropdown: "Flutter",
+                  versions: [
+                    { version: "v7\u200e", default: true, groups: [{ group: " ", pages: ["ui-kit/flutter/getting-started", "ui-kit/flutter/overview"] }] },
+                    { version: "v6\u200e", groups: [{ group: " ", pages: ["ui-kit/flutter/v6/getting-started"] }] },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const spec = (pages: string[]) => [
+    { name: "flutter-uikit-quickstart", title: "t", framework: "flutter", prerequisites: [], pages, related: [] },
+  ];
+
+  it("passes pages of the current version", () => {
+    expect(staleBundlePages(spec(["/ui-kit/flutter/getting-started", "/ui-kit/flutter/llms-flutter-v7"]), nav)).toEqual([]);
+  });
+
+  it("flags a versioned llms page that is still published after a new major", () => {
+    const problems = staleBundlePages(spec(["/ui-kit/flutter/getting-started", "/ui-kit/flutter/llms-flutter-v6"]), nav);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("llms-flutter-v6 is for v6, but the current");
+    expect(problems[0]).toContain("v7");
+  });
+
+  it("flags a listed page of an older version", () => {
+    const problems = staleBundlePages(spec(["/ui-kit/flutter/v6/getting-started"]), nav);
+    expect(problems).toEqual([expect.stringContaining("documents v6")]);
   });
 });
