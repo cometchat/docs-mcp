@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { BundleStore } from "../src/bundles/loader.js";
+import { BundleStore, type DocsPage } from "../src/bundles/loader.js";
 import { BUNDLES } from "../src/bundles/manifest.js";
 import { BackendError, NotFoundError } from "../src/lib/errors.js";
 import { BUNDLE_MAX_BYTES, byteLength } from "../src/lib/truncate.js";
@@ -131,18 +131,112 @@ describe("BundleStore", () => {
     await flush();
   });
 
-  it("serves the pages that loaded and names a deleted one, then keeps that bundle for the cache lifetime", async () => {
+  it("serves the pages that loaded and names a deleted one, then keeps that bundle for the cache lifetime once a second build agrees", async () => {
+    let now = 0;
     const fetchPage = vi.fn(async (p: string) => {
       if (p === "/ui-kit/flutter/llms-flutter-v6") throw new NotFoundError(p);
       return stubPage(p);
     });
-    const store = stubBundleStore(fetchPage);
+    const store = new BundleStore(BUNDLES, fetchPage, { cacheTtlMs: 60_000, retryBaseMs: 100, now: () => now });
     const b = (await store.get("flutter-uikit-quickstart"))!;
     expect(b.content).toContain("Source: https://www.cometchat.com/docs/ui-kit/flutter/getting-started");
-    expect(b.content).toContain("Could not load right now: `/ui-kit/flutter/llms-flutter-v6`");
-    // A 404 is what the docs say now, not a passing failure: no refetch storm.
+    expect(b.content).toContain("No longer in the docs: `/ui-kit/flutter/llms-flutter-v6`");
+    // No refetch storm while waiting to confirm the 404.
     await store.get("flutter-uikit-quickstart");
     expect(fetchPage).toHaveBeenCalledTimes(2);
+    now = 100; // the second build agrees: settled for the cache lifetime
+    await store.get("flutter-uikit-quickstart");
+    await flush();
+    now = 59_000;
+    await store.get("flutter-uikit-quickstart");
+    await flush();
+    expect(fetchPage).toHaveBeenCalledTimes(4);
+    expect(store.readyCount()).toBe(0);
+  });
+
+  it("doesn't cache a page as deleted on a first build until a second build agrees", async () => {
+    let now = 0;
+    let blip = true;
+    const fetchPage = vi.fn(async (p: string) => {
+      if (blip && p === "/ui-kit/flutter/llms-flutter-v6") throw new NotFoundError(p);
+      return stubPage(p);
+    });
+    const store = new BundleStore(BUNDLES, fetchPage, { cacheTtlMs: 60_000, retryBaseMs: 100, now: () => now });
+    expect((await store.get("flutter-uikit-quickstart"))!.content).toContain("No longer in the docs");
+    blip = false;
+    now = 100;
+    await store.get("flutter-uikit-quickstart");
+    await flush();
+    expect((await store.get("flutter-uikit-quickstart"))!.content).not.toContain("No longer in the docs");
+    expect(store.readyCount()).toBe(1);
+  });
+
+  it("fails a first build whose pages are all 404 for the backoff, then serves the confirmed empty bundle", async () => {
+    let now = 0;
+    const fetchPage = vi.fn(async (p: string): Promise<DocsPage> => {
+      throw new NotFoundError(p);
+    });
+    const store = new BundleStore(BUNDLES, fetchPage, { cacheTtlMs: 60_000, retryBaseMs: 100, now: () => now });
+    await expect(store.get("widget-embed")).rejects.toBeInstanceOf(BackendError);
+    await expect(store.get("widget-embed")).rejects.toBeInstanceOf(BackendError);
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    now = 100;
+    const b = (await store.get("widget-embed"))!;
+    expect(b.content).toContain("No longer in the docs: `/widget/html/integration`");
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(store.readyCount()).toBe(0);
+  });
+
+  it("restarts the outage backoff once every page answers, even while a 404 waits for confirmation", async () => {
+    let now = 0;
+    let mode: "ok" | "down" | "gone" = "ok";
+    const fetchPage = vi.fn(async (p: string) => {
+      if (mode === "down") throw new BackendError();
+      if (mode === "gone" && p === "/ui-kit/flutter/llms-flutter-v6") throw new NotFoundError(p);
+      return stubPage(p);
+    });
+    const store = new BundleStore(BUNDLES, fetchPage, { cacheTtlMs: 60_000, retryBaseMs: 1000, now: () => now });
+    await store.get("flutter-uikit-quickstart");
+    mode = "down";
+    for (const t of [60_000, 61_000, 63_000]) {
+      now = t; // three failures: the next wait would be 8 s
+      await store.get("flutter-uikit-quickstart");
+      await flush();
+    }
+    mode = "gone";
+    now = 67_000; // every page answers (one 404, unconfirmed)
+    await store.get("flutter-uikit-quickstart");
+    await flush();
+    mode = "down";
+    now = 68_000; // retry after the base wait
+    await store.get("flutter-uikit-quickstart");
+    await flush();
+    const calls = fetchPage.mock.calls.length;
+    now = 69_000; // one failure since the reset: waits 1 s, not 16 s
+    await store.get("flutter-uikit-quickstart");
+    await flush();
+    expect(fetchPage.mock.calls.length).toBe(calls + 2);
+  });
+
+  it("tells agents to search for a deleted page and to fetch an unavailable one", async () => {
+    const store = stubBundleStore(async (p) => {
+      if (p === "/ui-kit/android/getting-started-jetpack") throw new NotFoundError(p);
+      if (p === "/ui-kit/android/llms-android-v6") throw new BackendError();
+      return stubPage(p);
+    });
+    const b = (await store.get("android-uikit-quickstart"))!;
+    expect(b.content).toContain("No longer in the docs: `/ui-kit/android/getting-started-jetpack`. Search the docs");
+    expect(b.content).toContain("Could not load right now: `/ui-kit/android/llms-android-v6`. Fetch them by path.");
+  });
+
+  it("drops the docs host's footer from each section", async () => {
+    const store = stubBundleStore(async (p) => ({
+      ...stubPage(p),
+      content: `# ${p}\n\nBody.\n\n\nThis documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.\n`,
+    }));
+    const b = (await store.get("react-uikit-quickstart"))!;
+    expect(b.content).not.toContain("Mintlify");
+    expect(b.content).toContain("Body.");
   });
 
   it("replaces a cached bundle when one of its pages is deleted, so edits to the other pages still arrive", async () => {
@@ -166,7 +260,7 @@ describe("BundleStore", () => {
     await flush();
     const after = (await store.get("flutter-uikit-quickstart"))!;
     expect(after.content).toContain("edited");
-    expect(after.content).toContain("Could not load right now: `/ui-kit/flutter/llms-flutter-v6`");
+    expect(after.content).toContain("No longer in the docs: `/ui-kit/flutter/llms-flutter-v6`");
     // Served, but not counted as ready: it's missing a page.
     expect(store.readyCount()).toBe(0);
   });
@@ -274,6 +368,48 @@ describe("BundleStore", () => {
     await expect(store.get("widget-embed")).rejects.toBeInstanceOf(BackendError);
   });
 
+  it("drops a bundle whose pages are all deleted after two builds agree, and stops counting it as ready", async () => {
+    let now = 0;
+    let deleted = false;
+    const fetchPage = vi.fn(async (p: string) => {
+      if (deleted) throw new NotFoundError(p);
+      return stubPage(p);
+    });
+    const store = new BundleStore(BUNDLES, fetchPage, { cacheTtlMs: 1000, retryBaseMs: 100, now: () => now });
+    const before = (await store.get("widget-embed"))!;
+    expect(store.readyCount()).toBe(1);
+    deleted = true;
+    now = 2000;
+    await store.get("widget-embed");
+    await flush();
+    // One 404 could be a blip during a docs deploy.
+    expect(await store.get("widget-embed")).toEqual(before);
+    expect(store.readyCount()).toBe(1);
+    now = 2100;
+    await store.get("widget-embed");
+    await flush();
+    const after = (await store.get("widget-embed"))!;
+    expect(after.content).not.toContain("Source:");
+    expect(after.content).not.toContain("Each section below");
+    expect(after.content).toContain("No longer in the docs: `/widget/html/integration`");
+    expect(after.content).toContain("- `/widget/html/advanced`");
+    expect(store.readyCount()).toBe(0);
+    // Settled: kept for the cache lifetime, not refetched on every call.
+    const calls = fetchPage.mock.calls.length;
+    now = 2500;
+    await store.get("widget-embed");
+    await flush();
+    expect(fetchPage).toHaveBeenCalledTimes(calls);
+  });
+
+  it("still fails with backend_unavailable when nothing loads and some pages only timed out", async () => {
+    const store = stubBundleStore(async (p) => {
+      if (p === "/ui-kit/flutter/getting-started") throw new NotFoundError(p);
+      throw new BackendError();
+    });
+    await expect(store.get("flutter-uikit-quickstart")).rejects.toBeInstanceOf(BackendError);
+  });
+
   it("never exceeds the size budget, counting the title, separators and the closing list", async () => {
     // Pages sized so the sections alone fit but the whole bundle wouldn't.
     const filler = "y".repeat(Math.floor(BUNDLE_MAX_BYTES / 3) - 200);
@@ -291,6 +427,15 @@ describe("BundleStore", () => {
     expect(byteLength(b.content)).toBeLessThanOrEqual(BUNDLE_MAX_BYTES);
     expect(b.content).toContain("[Content truncated — full page available at https://www.cometchat.com/docs/sdk/javascript/setup-sdk]");
     expect(b.content).toContain("- `/sdk/javascript/send-message`");
+  });
+
+  it("keeps a cut first page within the budget when it has no paragraph break to cut at", async () => {
+    const store = stubBundleStore(async (p) => ({ ...stubPage(p), content: "x".repeat(BUNDLE_MAX_BYTES * 2) }));
+    for (const name of BUNDLES.map((b) => b.name)) {
+      const b = (await store.get(name))!;
+      expect(b.content, name).toContain("[Content truncated");
+      expect(byteLength(b.content), name).toBeLessThanOrEqual(BUNDLE_MAX_BYTES);
+    }
   });
 
   it("lists pages past the size budget instead of cutting them", async () => {

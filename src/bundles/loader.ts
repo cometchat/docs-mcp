@@ -28,6 +28,8 @@ export type BuildResult = {
   deferred: string[];
   /** The first page was cut to fit (it alone is over the budget). */
   truncated: boolean;
+  /** No page loaded: every one is 404. */
+  empty: boolean;
 };
 
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
@@ -35,6 +37,8 @@ const DEFAULT_RETRY_BASE_MS = 30 * 1000;
 // The docs .md export starts every page with this blockquote pointing at
 // llms.txt. Only that block is stripped: a page may open with a real callout.
 const INDEX_PREAMBLE_RE = /^> ## Documentation Index\n(?:>[^\n]*\n)*\s*/;
+// ...and ends it with this line, which would repeat between every section.
+const HOST_FOOTER_RE = /\s*This documentation is built and hosted on \[Mintlify\]\(https:\/\/mintlify\.com\), a developer documentation platform\.\s*$/;
 const INTRO =
   "Compiled from the current CometChat docs. Each section below is one docs page, headed by its source URL. Check commands against the official install instructions before running them.";
 
@@ -61,9 +65,10 @@ type Entry = {
  *
  * A build "settles" when every page either loaded or is gone (404): that is
  * what the docs say, so it is served for the cache lifetime and replaces the
- * previous bundle. A page that was there before has to be 404 on two builds
- * in a row before a settled bundle loses it, so a blip during a docs deploy
- * doesn't drop it for the whole cache lifetime. A build that hit an unavailable page (timeout, 5xx) never
+ * previous bundle. A 404 has to show up on two builds in a row before it is
+ * settled (a page a cached bundle has, or any page on a first build), so a
+ * blip during a docs deploy doesn't drop a page, or empty a bundle, for the
+ * whole cache lifetime. A build that hit an unavailable page (timeout, 5xx) never
  * replaces a settled bundle; the old one keeps being served and the next
  * build waits out a backoff (30 s, doubling, capped at the cache lifetime).
  * Before anything has settled, the partial bundle or the error is kept for
@@ -151,16 +156,7 @@ export class BundleStore {
     const now = this.now();
     const prev = this.entries.get(name);
     let next: Entry;
-    // A page the cached bundle has, now 404: wait for a second build to agree.
-    const newlyMissing =
-      !(r instanceof Error) && prev?.settled ? r.missing.filter((p) => !prev.missing.includes(p)) : [];
-    const confirmed = newlyMissing.every((p) => prev?.suspect?.includes(p));
-    if (!(r instanceof Error) && r.unavailable.length === 0 && confirmed) {
-      next = { bundle: r.bundle, settled: true, retryAt: now + this.ttl, failures: 0, missing: r.missing };
-    } else if (!(r instanceof Error) && r.unavailable.length === 0 && prev) {
-      next = { ...prev, retryAt: now + this.retryBase, suspect: newlyMissing };
-      logger.warn({ bundle: name, missing: newlyMissing, retryInMs: this.retryBase }, "bundle_page_missing_unconfirmed");
-    } else {
+    if (r instanceof Error || r.unavailable.length > 0) {
       const failures = (prev?.failures ?? 0) + 1;
       const retryAt = now + Math.min(this.ttl, this.retryBase * 2 ** (failures - 1));
       // A settled bundle is never replaced by a build that hit a passing failure.
@@ -183,6 +179,33 @@ export class BundleStore {
         },
         "bundle_build_incomplete",
       );
+      this.entries.set(name, next);
+      return next;
+    }
+    // Every page loaded or is 404. A 404 the cached bundle doesn't already
+    // account for may be a blip during a docs deploy: a second build in a row
+    // has to agree before it is what gets served for the cache lifetime.
+    const known = prev?.settled ? prev.missing : [];
+    const newlyMissing = r.missing.filter((p) => !known.includes(p));
+    if (newlyMissing.every((p) => prev?.suspect?.includes(p))) {
+      next = { bundle: r.bundle, settled: true, retryAt: now + this.ttl, failures: 0, missing: r.missing };
+    } else if (prev?.settled) {
+      // Every page answered, so the outage backoff starts over.
+      next = { ...prev, retryAt: now + this.retryBase, failures: 0, suspect: newlyMissing };
+    } else {
+      // Nothing settled yet: serve what loaded until the second build. If no
+      // page loaded, there is nothing to serve, so the call fails as before.
+      next = {
+        ...(r.empty ? (prev?.bundle ? { bundle: prev.bundle } : { error: unavailableError() }) : { bundle: r.bundle }),
+        settled: false,
+        retryAt: now + this.retryBase,
+        failures: 0,
+        missing: r.missing,
+        suspect: newlyMissing,
+      };
+    }
+    if (!next.settled || next.suspect) {
+      logger.warn({ bundle: name, missing: newlyMissing, retryInMs: this.retryBase }, "bundle_page_missing_unconfirmed");
     }
     this.entries.set(name, next);
     return next;
@@ -203,19 +226,27 @@ export class BundleStore {
         logger[gone ? "error" : "warn"]({ bundle: spec.name, path, err: err.message }, "bundle_page_unavailable");
         return;
       }
-      const body = r.value.content.replace(INDEX_PREAMBLE_RE, "").trim();
+      const body = r.value.content.replace(INDEX_PREAMBLE_RE, "").replace(HOST_FOOTER_RE, "").trim();
       sections.push({ path, url: r.value.url, text: `Source: ${r.value.url}\n\n${body}\n` });
     });
-    if (sections.length === 0) throw unavailableError();
+    // Nothing loaded. If only because the pages are gone (404), build a bundle
+    // that names them: record() then drops a cached bundle once a second build
+    // agrees, and it stops counting as ready. Otherwise the failure may pass.
+    if (sections.length === 0 && unavailable.length > 0) throw unavailableError();
 
-    const failed = [...missing, ...unavailable];
+    const list = (paths: string[]) => paths.map((p) => `\`${p}\``).join(", ");
     const assemble = (parts: string[], deferred: string[]) => {
       const more = [...deferred, ...spec.related];
       const tail = [
-        ...(failed.length > 0 ? [`Could not load right now: ${failed.map((p) => `\`${p}\``).join(", ")}. Fetch them by path.`, ""] : []),
+        // A 404 is gone from the docs: fetching it again won't help, searching might.
+        ...(missing.length > 0 ? [`No longer in the docs: ${list(missing)}. Search the docs for where this moved.`, ""] : []),
+        ...(unavailable.length > 0 ? [`Could not load right now: ${list(unavailable)}. Fetch them by path.`, ""] : []),
         ...(more.length > 0 ? ["## More pages", "", ...more.map((p) => `- \`${p}\``)] : []),
       ];
-      return [`# ${spec.title}`, "", INTRO, "", parts.join("\n---\n\n"), ...(tail.length > 0 ? ["---", "", ...tail] : [])].join("\n");
+      const body = parts.length > 0 ? [parts.join("\n---\n\n")] : [];
+      // With every page gone there are no sections to introduce.
+      const intro = parts.length > 0 ? INTRO : "None of this bundle's pages are in the current CometChat docs.";
+      return [`# ${spec.title}`, "", intro, "", ...body, ...(tail.length > 0 ? ["---", "", ...tail] : [])].join("\n");
     };
 
     // Whole pages, in order, while the WHOLE bundle (title, separators and the
@@ -231,7 +262,8 @@ export class BundleStore {
       if (byteLength(assemble([...parts, s.text], [...deferred, ...later])) <= BUNDLE_MAX_BYTES) {
         parts.push(s.text);
       } else if (parts.length === 0) {
-        const room = BUNDLE_MAX_BYTES - byteLength(assemble([""], later));
+        // Room for the cut text and the newline after it.
+        const room = BUNDLE_MAX_BYTES - byteLength(assemble([""], later)) - 1;
         parts.push(`${truncateAtParagraph(s.text, room, s.url)}\n`);
         truncated = true;
       } else {
@@ -251,6 +283,7 @@ export class BundleStore {
       unavailable,
       deferred,
       truncated,
+      empty: sections.length === 0,
     };
   }
 }

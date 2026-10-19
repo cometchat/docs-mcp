@@ -10,7 +10,8 @@
  *
  * `pages` are included in order while they fit in BUNDLE_MAX_BYTES; the rest,
  * and `related`, are listed as paths to fetch. Paths are docs paths without
- * the .md suffix. `npm run verify:bundles` checks every path still resolves.
+ * the .md suffix. `npm run verify:bundles` checks every path still resolves,
+ * is current, and installs current package versions.
  */
 export type BundleSpec = {
   name: string;
@@ -24,7 +25,7 @@ export type BundleSpec = {
 };
 
 /** When this list of pages was last reviewed against the docs navigation. */
-export const BUNDLES_REVIEWED = "2026-10-16";
+export const BUNDLES_REVIEWED = "2026-10-19";
 
 const CREDENTIALS = "CometChat App ID, Auth Key, and Region from app.cometchat.com";
 
@@ -33,7 +34,7 @@ export const BUNDLES: readonly BundleSpec[] = [
     name: "react-uikit-quickstart",
     title: "React UI Kit Quickstart",
     framework: "react",
-    prerequisites: ["Node.js 18+", "React 18+ project (Vite, Next.js, or CRA)", CREDENTIALS],
+    prerequisites: ["Node.js 20.19+", "React 18–20 project (Vite or Next.js)", CREDENTIALS],
     pages: ["/ui-kit/react/integration-react", "/ui-kit/react/llms-react-v7"],
     related: [
       "/ui-kit/react/integration-nextjs",
@@ -46,7 +47,7 @@ export const BUNDLES: readonly BundleSpec[] = [
     name: "react-native-uikit-quickstart",
     title: "React Native UI Kit Quickstart",
     framework: "react-native",
-    prerequisites: ["Node.js 18+", "React Native CLI or Expo (development build) project", CREDENTIALS],
+    prerequisites: ["Node.js 22.13+ (React Native 0.88)", "React Native CLI or Expo (development build) project", CREDENTIALS],
     pages: ["/ui-kit/react-native/react-native-cli-integration", "/ui-kit/react-native/llms-react-native-v5"],
     related: [
       "/ui-kit/react-native/expo-integration",
@@ -58,7 +59,7 @@ export const BUNDLES: readonly BundleSpec[] = [
     name: "angular-uikit-quickstart",
     title: "Angular UI Kit Quickstart",
     framework: "angular",
-    prerequisites: ["Node.js 18+", "Angular 17+ project", CREDENTIALS],
+    prerequisites: ["Node.js 20.19+", "Angular 17–21 project (the kit doesn't support 22 yet)", CREDENTIALS],
     pages: ["/ui-kit/angular/integration", "/ui-kit/angular/llms-angular-v5"],
     related: [
       "/ui-kit/angular/components/components-overview",
@@ -82,7 +83,7 @@ export const BUNDLES: readonly BundleSpec[] = [
     name: "ios-uikit-quickstart",
     title: "iOS UI Kit Quickstart",
     framework: "ios",
-    prerequisites: ["Xcode 16+", "Swift Package Manager", CREDENTIALS],
+    prerequisites: ["Xcode 16+", "iOS 15.1+ deployment target", "Swift Package Manager", CREDENTIALS],
     pages: ["/ui-kit/ios/getting-started", "/ui-kit/ios/llms-ios-v5"],
     related: ["/ui-kit/ios/components-overview", "/ui-kit/ios/ios-conversation", "/ui-kit/ios/theme-introduction"],
   },

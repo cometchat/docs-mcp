@@ -1,7 +1,7 @@
 ---
 name: CometChat
 description: Use when building real-time chat, voice/video calling, or messaging features into web and mobile applications. Reach for this skill when integrating messaging APIs, configuring authentication, building UI components, managing users/groups, or implementing calling functionality.
-last_verified: "2026-04-30"
+last_verified: "2026-10-19"
 ---
 
 # CometChat Skill
@@ -10,7 +10,7 @@ last_verified: "2026-04-30"
 
 CometChat is a real-time communications platform for adding chat, voice, and video calling to web and mobile apps. Agents use it through three integration paths:
 
-- **UI Kits** — pre-built, themable components for React, React Native, iOS (SwiftUI), Android (Compose), Flutter, Angular, Vue. Fastest path to a complete chat surface.
+- **UI Kits** — pre-built, themable components for React, React Native, iOS (UIKit, usable from SwiftUI), Android (Views or Jetpack Compose), Flutter, Angular. Fastest path to a complete chat surface.
 - **SDKs** — JavaScript, React Native, iOS, Android, Flutter. For when you need full layout control.
 - **REST APIs** — server-side user/group management, auth tokens, moderation, webhooks. Always used alongside an SDK or UI Kit on the client.
 
@@ -37,8 +37,8 @@ Reach for this skill when the user wants to:
 
 **Key packages** (install the latest release; each implementation bundle carries the install steps from the current docs):
 - JS SDK: `@cometchat/chat-sdk-javascript`
-- React UI Kit: `@cometchat/chat-uikit-react` (peer deps: `react` 18–20, `@cometchat/chat-sdk-javascript`, `@cometchat/calls-sdk-javascript`)
-- Angular UI Kit: `@cometchat/chat-uikit-angular` (Angular 17–21)
+- React UI Kit: `@cometchat/chat-uikit-react` (peer deps: `react` 18–20, `@cometchat/chat-sdk-javascript`; `@cometchat/calls-sdk-javascript` only for calling)
+- Angular UI Kit: `@cometchat/chat-uikit-angular` + `@cometchat/cards-angular` + `dompurify` (Angular 17–21; not 22 yet)
 - React Native UI Kit: `@cometchat/chat-uikit-react-native` + `@cometchat/chat-sdk-react-native`
 - Flutter UI Kit: `cometchat_chat_uikit` (pub.dev)
 - iOS UI Kit: `CometChatUIKitSwift` (Swift Package Manager)
@@ -56,7 +56,7 @@ Reach for this skill when the user wants to:
 | "Add chat to my React app" | UI Kit (`@cometchat/chat-uikit-react`) — pull `react-uikit-quickstart` bundle |
 | "I want full layout control over messages" | JS SDK directly — pull `js-sdk-messaging-basics` bundle |
 | "Add chat to a Squarespace / Webflow / Shopify site" | Widget — pull `widget-embed` bundle |
-| "I'm building a SaaS where each tenant should be isolated" | UID prefixing + server-issued Auth Tokens — pull `multi-tenant-chat` bundle |
+| "I'm building a SaaS where each tenant should be isolated" | One CometChat app per tenant under a multi-tenant plan (Management API) — pull `multi-tenant-chat` bundle |
 | "Add presence + typing indicators" | SDK — pull `presence-and-typing` bundle |
 | "I need content moderation" | Dashboard moderation rules + REST + webhooks — pull `moderation-setup` bundle |
 | "Add voice/video calling" | UI Kit + Calls SDK (`@cometchat/calls-sdk-javascript`) |
@@ -73,11 +73,11 @@ Reach for this skill when the user wants to:
 ## Common Gotchas
 
 - **Init / login order.** `init()` must resolve before `login()`. `login()` must resolve before rendering UI Kit components. Use a `ready` flag.
-- **Env-var prefix.** Vite needs `VITE_*`, Create React App needs `REACT_APP_*`, RN needs no prefix. The docs examples default to Vite-style; rewrite for the user's bundler.
-- **Missing CSS / theme imports** in UI Kit projects render unstyled.
+- **Env-var prefix.** Vite needs `VITE_*`, Next.js client code needs `NEXT_PUBLIC_*`, RN needs no prefix. The docs examples default to Vite-style; rewrite for the user's bundler.
+- **Missing CSS / theme imports** render unstyled where the kit needs one (check the platform's integration page; React v7 ships its styles).
 - **Auth Key shipped to production.** Never. Use Auth Tokens minted server-side.
-- **iOS deployment target below 13.0** or **Android `minSdk` below 24** — UI Kits won't link.
-- **Calling `getUsers()` directly from a multi-tenant client** returns all users across all tenants. Always proxy through your server with tenant filtering.
+- **iOS deployment target below 15.1**, or **Android `minSdk` below 28** (24 for React Native) — the current UI Kits won't build.
+- **Sharing one app between tenants.** Users in one app can see each other; isolate tenants with one app each (multi-tenancy), not with UID prefixes.
 - **Forgetting to remove SDK listeners** on screen unmount leaks duplicate handlers.
 
 ## Verification Checklist
@@ -88,9 +88,9 @@ Before reporting an integration as done:
 - [ ] `login()` is awaited before any UI Kit component mounts.
 - [ ] Credentials are read from environment variables, not hardcoded.
 - [ ] Auth Key is flagged as development-only with a TODO to switch to Auth Token.
-- [ ] CSS / theme is imported (UI Kit projects only).
+- [ ] Styles are set up as the platform's integration page says (UI Kit projects only).
 - [ ] Listeners are added with stable IDs and removed on unmount.
-- [ ] If multi-tenant, every UID/GUID is prefixed and `metadata.tenantId` is set.
+- [ ] If multi-tenant, each tenant has its own app and the client uses that app's App ID.
 - [ ] Production-ready next steps are surfaced to the user (Auth Token migration, moderation rules, webhook signatures).
 
 ## Resources
@@ -110,4 +110,4 @@ Before reporting an integration as done:
 - Each bundle is also discoverable as an MCP resource: `cometchat://bundles/<bundle-name>`.
 - Live documentation: https://www.cometchat.com/docs
 - Pricing: https://www.cometchat.com/pricing (free tier: 100 MAU)
-- Source for this MCP server: this server is built from the public `github.com/cometchat/docs` repository.
+- This server's search index is built from the public `github.com/cometchat/docs` repository; bundles and page fetches read the live docs.
