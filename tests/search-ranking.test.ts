@@ -348,6 +348,9 @@ describe("query tokens", () => {
   it("are de-duplicated case-insensitively, with versions kept apart", () => {
     expect(parseQuery('Message message "MESSAGE" list v4 V4 4.0')).toEqual({
       terms: ["message", "list"],
+      // `words` keeps the repeats, in the order written: relaxed matching's
+      // in-order title rule needs them to match a title key that repeats one.
+      words: ["message", "message", "message", "list"],
       versions: [{ word: "v4", label: "v4" }],
     });
   });
@@ -365,6 +368,60 @@ describe("query tokens", () => {
   });
 });
 
+describe("limit", () => {
+  // SearchInputSchema holds the MCP tool to 1..25, but the eval, the lab
+  // harnesses and the refresher's smoke test call the client directly, and
+  // rows are cut with slice(0, limit): a negative limit is an offset from the
+  // end, so it returned the whole window but one.
+  it("is clamped at both ends for callers the tool schema does not check", async () => {
+    for (const limit of [-1, 0, 0.5]) {
+      const r = await client.search("delivery and read receipts", { limit });
+      expect(r.results.length, `limit ${limit}`).toBe(1);
+    }
+    // Not a number at all: the default page, not an empty or unbounded one.
+    const byDefault = (await client.search("delivery and read receipts")).results.length;
+    expect(byDefault).toBeGreaterThan(1);
+    for (const limit of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const r = await client.search("delivery and read receipts", { limit });
+      expect(r.results.length, `limit ${limit}`).toBe(byDefault);
+    }
+    expect((await client.search("delivery and read receipts", { limit: 3 })).results.length).toBe(3);
+  });
+});
+
+describe("tied results", () => {
+  // bm25 ties are common (six platform copies of one page), and the order of
+  // tied rows was the builder's file-walk order, which no rule fixes: two
+  // index generations of the same docs could answer the same query
+  // differently, and a check on a tie boundary pass or fail by chance.
+  it("come back in the same order whatever order the index was built in", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "cometchat-mcp-ties-"));
+    const twins: Page[] = ["alpha", "bravo", "charlie", "delta"].map((name) => ({
+      path: `/sdk/${name}/idle-timeout`,
+      title: "Idle Timeout",
+      section: "SDK / Idle",
+      version: null,
+      isCurrent: true,
+      body: "End a call session when the idle timeout elapses with no participant.",
+    }));
+    const order = async (pages: Page[], file: string) => {
+      const at = path.join(dir, file);
+      buildIndex(at, pages);
+      const c = new SqliteSearchClient(at);
+      try {
+        return (await c.search("idle timeout", { limit: 4 })).results.map((r) => r.url);
+      } finally {
+        c.close();
+      }
+    };
+    const forward = await order(twins, "forward.sqlite");
+    const reversed = await order([...twins].reverse(), "reversed.sqlite");
+    expect(forward).toEqual(reversed);
+    expect(forward.length).toBe(4);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe("query plan", () => {
   it("scans the FTS index once and reads only the returned pages", () => {
     const db = new Database(indexPath, { readonly: true });
@@ -379,6 +436,9 @@ describe("query plan", () => {
         terms: 1,
         titleText: " theme ",
         phrases: '["\\"theme\\""]',
+        startWidened: 0,
+        docSetGroups: "[]",
+        unnamedPlatforms: "[]",
       }) as { detail: string }[]
     ).map((r) => r.detail);
     db.close();
@@ -627,7 +687,87 @@ describe("search failure logging", () => {
   });
 });
 
+describe("an index from an older builder", () => {
+  it("is served, with one warning naming the search text it lacks", async () => {
+    // This file's schema is the 0.1.6 builder's: no keywords, title keys or code languages.
+    const spy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const c = new SqliteSearchClient(indexPath);
+    try {
+      expect((await c.search("install")).results.length).toBeGreaterThan(0);
+      await c.search("message list");
+      const outdated = spy.mock.calls.filter((call) => (call as unknown[])[1] === "sqlite_index_outdated");
+      expect(outdated).toHaveLength(1);
+      expect(outdated[0][0]).toEqual({ indexPath, missing: ["keywords", "title_key", "languages"] });
+    } finally {
+      spy.mockRestore();
+      c.close();
+    }
+  });
+});
+
 /** Writes the builder's schema; `trails: false` omits the product trails (an older index). */
+describe("a page titled after the API it documents", () => {
+  let dir: string;
+  let api: SqliteSearchClient;
+  // Since identifiers in inline code are indexed, every page of a doc set that
+  // calls the API holds its name, while the reference page that documents it
+  // is the longest page of the set -- so bm25's length normalization ranked
+  // the passing mentions first. The fixture is that shape.
+  const pages: Page[] = [
+    {
+      path: "/calls/ios/session-settings",
+      title: "SessionSettingsBuilder",
+      section: "Calls / Ios",
+      trail: "Calls SDK / iOS",
+      version: null,
+      isCurrent: true,
+      body: `Every session setting of the iOS Calls SDK, one by one. SessionSettingsBuilder. ${BOILERPLATE}`,
+    },
+    {
+      path: "/calls/ios/call-layouts",
+      title: "Call Layouts",
+      section: "Calls / Ios",
+      trail: "Calls SDK / iOS",
+      version: null,
+      isCurrent: true,
+      body: "Set the layout of an iOS call with SessionSettingsBuilder, then SessionSettingsBuilder again.",
+    },
+    // A one-word title that is an ordinary word still earns nothing: it is a
+    // word half the queries about the product hold.
+    {
+      path: "/calls/ios/theme",
+      title: "Layouts",
+      section: "Calls / Ios",
+      trail: "Calls SDK / iOS",
+      version: null,
+      isCurrent: true,
+      body: "Colors and fonts of the iOS call screen.",
+    },
+  ];
+
+  beforeAll(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "cometchat-mcp-apititle-"));
+    const at = path.join(dir, "index.sqlite");
+    buildIndex(at, pages);
+    api = new SqliteSearchClient(at);
+  });
+
+  afterAll(() => {
+    api.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("ranks it above a shorter page that only mentions the API", async () => {
+    const r = await api.search("ios calls sessionsettingsbuilder", { limit: 5 });
+    expect(paths(r)).toEqual(["/calls/ios/session-settings", "/calls/ios/call-layouts"]);
+  });
+
+  it("leaves a one-word title that is an ordinary word unboosted", async () => {
+    const r = await api.search("ios call layouts", { limit: 5 });
+    expect(paths(r)[0]).toBe("/calls/ios/call-layouts");
+  });
+});
+
 function buildIndex(at: string, pages: Page[], opts: { trails?: boolean } = {}) {
   const trails = opts.trails ?? true;
   const db = new Database(at);

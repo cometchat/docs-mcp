@@ -79,12 +79,12 @@ The agent reads CometChat's documentation, pulls the relevant implementation bun
 
 ## Tools
 
-- `search_cometchat_docs` — Search across SDK guides, UI Kit references, REST API documentation, and OpenAPI specs. Returns ranked snippets with titles + direct links. Optional `version` filter.
-- `fetch_cometchat_doc_page` — Fetch the full content of any documentation page as markdown by URL or relative path.
+- `search_cometchat_docs` — Search the SDK, UI Kit, Calls, REST API, AI agent, notification and moderation docs by topic, API name or error message. Returns ranked snippets with page URLs, current versions first. Optional `version` filter and `limit` (up to 25).
+- `fetch_cometchat_doc_page` — Fetch one documentation page in full as markdown by URL or path, following moved pages. Pages over 50 KiB are truncated with a link to the full page.
 - `get_cometchat_implementation_bundle` — Return the implementation bundle for a named scenario: the scenario's current docs pages (for a UI Kit: its integration guide, then the platform's AI reference page) compiled into one document, plus related page paths.
 - `list_cometchat_bundles` — List every available implementation bundle (identifier, title, framework, date its page list was reviewed) for discovery.
 
-All four carry `readOnlyHint: true`, a `title` annotation, and a declared `outputSchema` with structured results. Names are ≤ 64 characters. Descriptions describe contracts only — no behavioral instructions to the agent, no cross-tool routing, no marketing language.
+All four carry `readOnlyHint: true`, a `title` annotation, and a declared `outputSchema` with structured results. Names are ≤ 64 characters. Each description states what the tool does, when it fits and its limits (errors, rate limit), naming this server's other tools only where one serves a specific need ("identifiers come from `list_cometchat_bundles`"). They carry no directives to the agent, no references to other servers or products, and no marketing language. `tests/tools.test.ts` guards the tool, parameter and output-field descriptions and the `initialize` instructions against a list of banned phrasings, and checks that list still rejects the shapes it was written for; it is a banlist, not a proof.
 
 ## Resources
 
@@ -132,7 +132,7 @@ CometChat is a real-time communications platform for adding chat, voice, and vid
 | Field | Value |
 |---|---|
 | Display name | CometChat Docs |
-| Version | 0.1.6 |
+| Version | 0.1.7 |
 | Protocol | MCP `2025-06-18` |
 | Transport | Streamable HTTP (with SSE) |
 | Authentication | None (public docs only) |
@@ -171,10 +171,14 @@ npm install
 DOCS_REPO=../cometchat-docs-repo npm run build:index
 npm run dev
 
-# Run the test suite
+# Run the test suite (vitest: validation, truncation, bundles, tools, resources, fetch,
+#  search ranking and the index builder)
 npm test
 
-# Check every docs page a bundle lists still exists (network)
+# Score search ranking on the index you built (CI pins the docs commit: see DEPLOY.md)
+DOCS_REPO=../cometchat-docs-repo npm run eval:search
+
+# Check every docs page a bundle lists still exists and is current (network)
 npm run verify:bundles
 ```
 

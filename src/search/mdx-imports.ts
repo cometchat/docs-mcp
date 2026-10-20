@@ -21,6 +21,18 @@ const IMPORT_RE = /^[ \t]*import[ \t]+([A-Za-z_$][\w$]*)[ \t]+from[ \t]+(['"])([
 const ESM_IMPORT_LINE_RE = /^[ \t]*import[ \t][^\n]*[ \t]from[ \t]+['"][^'"\r\n]+['"][ \t]*;?[ \t]*$/gm;
 const SNIPPET_EXT_RE = /\.mdx?$/i;
 
+/**
+ * The paths the index builder needs out of a docs checkout: the top-level
+ * files (docs.json), every page, and the snippets a page may import — which
+ * SNIPPET_EXT_RE takes with either extension, so .md counts. The four places
+ * that clone the docs must ask for the same set, or the index CI scores is not
+ * the index production builds: Dockerfile, .github/workflows/ci.yml,
+ * .github/workflows/search-eval-drift.yml and src/index/refresher.ts, the last
+ * of which had drifted. tests/docs-sparse-checkout.test.ts holds the three
+ * files that cannot import this one to it.
+ */
+export const DOCS_SPARSE_PATTERNS = ["/*", "!/*/", "**/*.mdx", "**/*.md"];
+
 export class SnippetInliner {
   /** Snippet files whose frontmatter declares an executable language; never inlined. */
   readonly unsafe = new Set<string>();

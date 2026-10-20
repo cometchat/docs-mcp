@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SearchInputSchema } from "../src/lib/validation.js";
 import { normalizeVersionLabel, queryVersionLabel } from "../src/search/version.js";
-import { SEARCH_TOOL_DEFINITION } from "../src/tools/search.js";
+import { SEARCH_TOOL_DEFINITION, runSearch } from "../src/tools/search.js";
 
 describe("search version input", () => {
   it.each([
@@ -42,6 +42,25 @@ describe("search version input", () => {
 
   it.each(["404", "4", "v", "v4-beta", "oauth", "1.x"])("does not read the query word %s as a version", (word) => {
     expect(queryVersionLabel(word)).toBeNull();
+  });
+
+  // `version` is optional on a result (815 of the indexed pages carry none,
+  // every REST API page among them), so the description says "when the page is
+  // versioned" rather than promising a label on each result.
+  it("promises a version label only where the output schema has one", async () => {
+    const item = SEARCH_TOOL_DEFINITION.outputSchema.properties.results.items;
+    expect(item.required).not.toContain("version");
+    const stub = {
+      async search() {
+        return {
+          results: [{ title: "Create", url: "https://www.cometchat.com/docs/rest-api/groups/create", section: "REST API", snippet: "x", isCurrent: true }],
+          totalAvailable: 1,
+        };
+      },
+    };
+    const r = await runSearch({ query: "rest api create group" }, stub);
+    expect(r.results[0]).not.toHaveProperty("version");
+    expect(SEARCH_TOOL_DEFINITION.description).not.toMatch(/each result reports its version label/i);
   });
 
   it("every example in the tool's version description is accepted as written", () => {

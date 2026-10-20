@@ -22,12 +22,12 @@ Reference shape: Clerk's listing.
 
 - **Public docs URL:** `https://www.cometchat.com/docs/connectors/claude` *(stub, to publish)*
 - **Connector URL:** `https://mcp.cometchat.com/mcp`
-- **Support email:** TBD
+- **Support email:** support@cometchat.com
 
 ## Reviewer notes (private, sent with submission)
 
 - No authentication required — connector usable as soon as added.
-- All three tools are read-only with `readOnlyHint: true` annotations and `title` set.
+- All four tools are read-only with `readOnlyHint: true` annotations and `title` set.
 - Backend is a SQLite FTS5 index built from the public `github.com/cometchat/docs` repository plus a passthrough `.md` fetch against `https://www.cometchat.com/docs`. Both first-party.
 - Five example queries to try:
   1. "How do I install the React UI Kit?" → expect `get_cometchat_implementation_bundle` for `react-uikit-quickstart`.
@@ -64,9 +64,9 @@ To publish at `cometchat.com/docs/connectors/claude` before review:
 - [ ] CI green on `main`.
 - [ ] Production deployment at `https://mcp.cometchat.com/mcp` reachable, returns `200` on `GET /health` (a `503 degraded` response means the SQLite index is missing or empty — block release until the index artifact is mounted/copied).
 - [ ] `ALLOWED_HOSTS` in production includes the public hostname; verify by sending `Host: evil.example.com` and confirming `403`.
-- [ ] MCP Inspector lists all three tools with correct titles, descriptions, `readOnlyHint: true`.
-- [ ] All three tools execute against representative inputs in a custom-connector pass inside Claude.
-- [ ] Description audit complete — no behavioral instructions, no cross-tool routing, no marketing.
+- [ ] MCP Inspector lists all four tools with correct titles, descriptions, `readOnlyHint: true`.
+- [ ] All four tools execute against representative inputs in a custom-connector pass inside Claude.
+- [ ] Description audit complete — factual only: no directives to the agent, sibling tools named only where one serves a specific need, no other servers or products, no marketing. Read the four descriptions yourself; `tests/tools.test.ts` only rejects a list of known phrasings, across the tool, parameter and output-field descriptions and the `initialize` instructions.
 - [ ] Public docs page live (or scheduled to publish on acceptance).
 - [ ] Reviewer notes finalized.
 - [ ] Submission form fields finalized.

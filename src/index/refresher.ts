@@ -7,6 +7,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { logger } from "../lib/logger.js";
 import { withoutGitRepoEnv } from "../lib/git-env.js";
+import { DOCS_SPARSE_PATTERNS } from "../search/mdx-imports.js";
 import type { SqliteSearchClient } from "../search/sqlite.js";
 import {
   DEFAULT_POLICY,
@@ -302,7 +303,7 @@ export class IndexRefresher {
     );
     await exec(
       "git",
-      ["-C", dir, "sparse-checkout", "set", "--no-cone", "/*", "!/*/", "**/*.mdx"],
+      ["-C", dir, "sparse-checkout", "set", "--no-cone", ...DOCS_SPARSE_PATTERNS],
       { timeout, env },
     );
     await exec("git", ["-C", dir, "fetch", "--depth", "1", "origin", docsCommit], { timeout, env });

@@ -10,14 +10,14 @@ export const FETCH_TOOL_DEFINITION = {
   name: FETCH_TOOL_NAME,
   title: "Fetch CometChat Documentation Page",
   description:
-    "Fetches the full content of a single CometChat documentation page by URL or path. Returns the page content as markdown along with title and section metadata. Path can be passed as a full https://www.cometchat.com/docs URL or as a relative path such as '/sdk/javascript/overview'.",
+    "Returns one CometChat documentation page in full, as markdown with its title, url and section. Takes a known url or path, such as a result url from search_cometchat_docs (which finds pages by topic) or a docs link in a bundle. Each call reads the live page from the docs site: moved pages are followed and set redirectedFrom, and pages over 50 KiB are truncated, ending with a link to the full page. Errors: not_found for an unknown page, invalid_input for a URL or path outside the docs, backend_unavailable when the docs site fails or times out (retryable).",
   inputSchema: {
     type: "object" as const,
     properties: {
       path: {
         type: "string",
         description:
-          "Documentation path or full URL. Relative paths like '/sdk/javascript/overview' and full URLs both work.",
+          "Page path such as '/sdk/javascript/overview' (a leading slash, a '/docs' prefix and a '.md' or '.mdx' suffix are optional), or a full https://www.cometchat.com/docs/... URL; up to 500 characters. Query strings and #fragments are ignored.",
       },
     },
     required: ["path"],

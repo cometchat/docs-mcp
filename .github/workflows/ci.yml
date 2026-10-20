@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+# Every job here only reads this repository and, for the index, cometchat/docs.
+# Without this they run with the repository's default GITHUB_TOKEN scope, which
+# on a repository created before the org default was tightened is write —
+# search-eval and build-index check out a second repository and run `npm ci`
+# over it. search-eval-drift.yml already sets the same thing; docker-image
+# keeps its own copy so the scope is visible beside the job that pushes.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -85,6 +94,70 @@ jobs:
           name: search-index
           path: cometchat-mcp/data/index.sqlite
           retention-days: 7
+
+  # Scores search ranking with the golden queries in scripts/eval-search.ts,
+  # on the cometchat/docs commit pinned in .github/eval-docs-commit, so the
+  # result depends only on this repo's commit. Exit 1 is a ranking regression;
+  # exit 2 is a check naming a page the pinned docs lack. Bump the pin
+  # together with the cases it grounds. search-eval-drift.yml runs the same
+  # eval against docs main, without blocking anything.
+  search-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: cometchat-mcp
+
+      - name: Read the pinned docs commit
+        id: pin
+        run: |
+          sha=$(tr -d '[:space:]' < cometchat-mcp/.github/eval-docs-commit)
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::.github/eval-docs-commit must hold one full commit sha, got '$sha'"; exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      # Blobless and sparse, as the Dockerfile's indexer stage clones it: the
+      # top-level files (docs.json), every .mdx page, and the .md files a page
+      # may import as a snippet (src/search/mdx-imports.ts takes either
+      # extension), so this index matches the one build-index uploads.
+      - uses: actions/checkout@v5
+        with:
+          repository: cometchat/docs
+          path: cometchat-docs
+          ref: ${{ steps.pin.outputs.sha }}
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/*/
+            **/*.mdx
+            **/*.md
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: cometchat-mcp/package-lock.json
+
+      - name: Install
+        working-directory: cometchat-mcp
+        run: npm ci
+
+      - name: Build search index
+        working-directory: cometchat-mcp
+        env:
+          DOCS_REPO: ${{ github.workspace }}/cometchat-docs
+          INDEX_PATH: ${{ github.workspace }}/search-eval/index.sqlite
+        run: npm run build:index
+
+      - name: Score search ranking
+        working-directory: cometchat-mcp
+        env:
+          DOCS_REPO: ${{ github.workspace }}/cometchat-docs
+          INDEX_PATH: ${{ github.workspace }}/search-eval/index.sqlite
+        run: npm run eval:search
 
   # Builds the image the way the deploy pipelines do and asserts the contract
   # the Dockerfile promises. Nothing else here builds the image, so image-level

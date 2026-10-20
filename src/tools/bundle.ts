@@ -9,13 +9,14 @@ export const BUNDLE_TOOL_DEFINITION = {
   name: BUNDLE_TOOL_NAME,
   title: "Get CometChat Implementation Bundle",
   description:
-    "Returns an implementation bundle for a named CometChat integration scenario: the scenario's current documentation pages (for a UI Kit: its integration guide, then the platform's AI reference page), compiled into one markdown document, plus paths of related pages. Bundles cover React, Angular, React Native, Flutter, iOS, Android, the JavaScript SDK, moderation, multi-tenancy, and the widget.",
+    "Returns one CometChat implementation bundle: the scenario's current documentation pages (for a UI Kit: its integration guide, then the platform's AI reference page) compiled into one markdown document, each headed by its source URL, plus paths of related pages, prerequisites and a last_verified date. Bundles cover UI Kit quickstarts (React, Angular, React Native, Flutter, iOS, Android), JavaScript SDK messaging, the no-code widget, moderation setup, multi-tenant chat, and presence and typing. Identifiers come from list_cometchat_bundles; a well-formed identifier that names no bundle returns an unknown_bundle error listing the valid ones, and any other value invalid_input. For topics no bundle covers, search_cometchat_docs searches the documentation. Pages are read from the live docs site and cached for a few minutes; when they cannot be loaded the call returns backend_unavailable.",
   inputSchema: {
     type: "object" as const,
     properties: {
       bundle: {
         type: "string",
-        description: "Bundle name in lowercase kebab-case, e.g. 'react-uikit-quickstart'.",
+        description:
+          "Bundle identifier as list_cometchat_bundles returns it, e.g. 'react-uikit-quickstart': lowercase letters, digits and hyphens, up to 100 characters.",
       },
     },
     required: ["bundle"],

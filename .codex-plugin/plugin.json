@@ -1,6 +1,6 @@
 {
   "name": "cometchat",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Add real-time chat, voice, video, and moderation to your app. Codex reads CometChat documentation, fetches reference pages, and pulls implementation bundles built from the current docs for React, Angular, React Native, Flutter, iOS, Android, the JavaScript SDK, the no-code widget, moderation, multi-tenant chat, and presence.",
   "author": {
     "name": "CometChat",

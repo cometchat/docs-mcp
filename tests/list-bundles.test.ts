@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { stubBundleStore } from "./helpers/bundles.js";
 import {
   LIST_BUNDLES_TOOL_DEFINITION,
@@ -24,6 +22,31 @@ describe("list_cometchat_bundles", () => {
       expect(b.framework).toBeTruthy();
       expect(b.last_verified).toBeTruthy();
       expect(b).not.toHaveProperty("content");
+    }
+  });
+
+  // get_cometchat_implementation_bundle's description enumerates the bundles by
+  // hand. Tie the list to the store: a bundle added or removed, or a word
+  // dropped from the sentence, fails here rather than in a directory review.
+  const NAMED_IN_BUNDLE_DESCRIPTION: Record<string, string> = {
+    "angular-uikit-quickstart": "Angular",
+    "android-uikit-quickstart": "Android",
+    "flutter-uikit-quickstart": "Flutter",
+    "ios-uikit-quickstart": "iOS",
+    "js-sdk-messaging-basics": "JavaScript SDK messaging",
+    "moderation-setup": "moderation setup",
+    "multi-tenant-chat": "multi-tenant chat",
+    "presence-and-typing": "presence and typing",
+    "react-native-uikit-quickstart": "React Native",
+    "react-uikit-quickstart": "React",
+    "widget-embed": "widget",
+  };
+
+  it("is described by a sentence naming every bundle the store holds, and no other", async () => {
+    const store = stubBundleStore();
+    expect(Object.keys(NAMED_IN_BUNDLE_DESCRIPTION).sort()).toEqual(store.list());
+    for (const [id, words] of Object.entries(NAMED_IN_BUNDLE_DESCRIPTION)) {
+      expect(BUNDLE_TOOL_DEFINITION.description, id).toContain(words);
     }
   });
 

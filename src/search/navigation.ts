@@ -59,6 +59,38 @@ export function resolvePageVersion(pagePath: string, nav: NavigationIndex): Page
   return versionFromPath(key);
 }
 
+/**
+ * Doc sets docs.json no longer lists at all but which keep older versions in
+ * vN/ or N.0/ folders: retired products, such as the Kotlin UI Kit under
+ * ui-kit/kotlin/ (v3 at the root, v2 under 2.0/). The path convention would
+ * call their unversioned pages current. Empty without a usable navigation.
+ */
+export function retiredFolders(pagePaths: string[], nav: NavigationIndex): Set<string> {
+  const retired = new Set<string>();
+  if (nav.pages.size === 0) return retired;
+  const listed = new Set<string>();
+  for (const key of nav.pages.keys()) {
+    const parts = key.split("/");
+    for (let i = 1; i < parts.length; i++) listed.add(parts.slice(0, i).join("/"));
+  }
+  for (const page of pagePaths) {
+    const parts = normalizePagePath(page).split("/");
+    const at = parts.slice(0, -1).findIndex(isVersionSegment);
+    if (at > 0) {
+      const folder = parts.slice(0, at).join("/");
+      if (!listed.has(folder)) retired.add(folder);
+    }
+  }
+  return retired;
+}
+
+/** Whether the page sits in (or below) one of `folders`. */
+export function isInFolder(pagePath: string, folders: Set<string>): boolean {
+  const parts = normalizePagePath(pagePath).split("/");
+  for (let i = parts.length - 1; i > 0; i--) if (folders.has(parts.slice(0, i).join("/"))) return true;
+  return false;
+}
+
 /** Path convention: a vN/ or N.0/ folder marks an older version. */
 export function versionFromPath(pagePath: string): PageVersion {
   const found = normalizePagePath(pagePath).split("/").slice(0, -1).find(isVersionSegment);

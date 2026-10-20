@@ -5,12 +5,12 @@ Target: `https://mcp.cometchat.com` (subdomain to confirm with DevOps).
 ## Container
 
 ```
-docker build --target runtime -t cometchat-mcp:0.1.6 .
+docker build --target runtime -t cometchat-mcp:0.1.7 .
 docker run --rm -p 3000:3000 \
   -v $(pwd)/data:/app/data \
   -e NODE_ENV=production \
   -e ALLOWED_HOSTS=mcp.cometchat.com \
-  cometchat-mcp:0.1.6
+  cometchat-mcp:0.1.7
 ```
 
 The image bundles `skills/` and the compiled server. Implementation bundles
@@ -19,6 +19,12 @@ index is **not** bundled — mount it at `/app/data` or build it inside the
 container before launch (see "Index build" below). The server still boots
 without the index; `/health` will report `degraded` and the search tool will
 return `backend_unavailable` per call until the index is in place.
+
+Build a mounted index with the builder of the release you run. A newer server
+serves an index from an older builder, but without the search text its ranking
+relies on: 0.1.7 on a 0.1.6 index has no search keywords ("unsend", "blue
+ticks"), title keys or code languages, and logs `sqlite_index_outdated` at warn,
+naming the missing columns, when it opens one.
 
 ## Index build (CI or pre-deploy)
 
@@ -30,6 +36,12 @@ DOCS_REPO=/tmp/cometchat-docs INDEX_PATH=./data/index.sqlite npm run build:index
 ```
 
 The provided GitHub Actions workflow (`.github/workflows/ci.yml`) already does this and uploads the index as an artifact — wire that artifact to your deployment job.
+
+### Search ranking eval
+
+`npm run eval:search` scores ranking against the golden queries in `scripts/eval-search.ts` (`INDEX_PATH` is the index; with `DOCS_REPO` set it first checks that every page a case names exists). It exits 1 when a check fails and 2 when a case names a missing page.
+
+CI runs it as the `search-eval` job in `ci.yml`, on the `cometchat/docs` commit pinned in `.github/eval-docs-commit`: a blobless, sparse checkout of the top-level files, `*.mdx` and `*.md`, as the Dockerfile clones it, then an index build and the eval. **A workflow job blocks a merge only once it is a required status check**, which lives in GitHub settings, not in this repository: add `search-eval` (with `test` and `index-refresh`) under Settings → Branches → the `main` protection rule, or the job goes red without stopping anything. A docs change therefore never fails a pull request. `search-eval-drift.yml` runs the same eval against docs `main` every day, gating nothing, and its job summary says whether main has drifted: exit 2 means a case names a page main moved or removed, exit 1 that a check fails on main's docs. Update the cases and bump the pin in the same change.
 
 ## Refresh cadence
 
@@ -259,7 +271,7 @@ Aggregate at the platform level (Datadog, CloudWatch, etc.) and watch for:
 
 ## Rollback
 
-The image is stateless. Roll back by pointing the load balancer at the previous tag. The index is a build artifact; an old image plus the current index works as long as schema didn't change.
+The image is stateless. Roll back by pointing the load balancer at the previous tag. The index is a build artifact (the `full` target bakes its own). An old image plus the current index works as long as the schema didn't change, or changed compatibly: 0.1.6 and 0.1.7 each serve the other's index. 0.1.6 reads the columns 0.1.7 adds as plain search text, and 0.1.7 serves a 0.1.6 index without its search fixes (see "Container").
 
 ## Retiring the Mintlify-generated MCP
 

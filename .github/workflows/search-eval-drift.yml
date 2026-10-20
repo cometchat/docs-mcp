@@ -1,0 +1,102 @@
+name: Search eval drift
+
+# Runs the search ranking eval (scripts/eval-search.ts) against cometchat/docs
+# main once a day. CI's blocking search-eval job pins the docs commit in
+# .github/eval-docs-commit, so a docs change can never fail a pull request;
+# this job reports when docs main has drifted from what the cases expect. It
+# gates nothing.
+#   exit 2  grounding drift: a case names a page main no longer has (a move
+#           or rename). Update the case and bump the pin together.
+#   exit 1  ranking drift: on main's docs some check fails that passes on the
+#           pinned commit. Fix the ranking or the case, then bump the pin.
+
+on:
+  schedule:
+    - cron: "40 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eval-docs-main:
+    runs-on: ubuntu-latest
+    # ci.yml's search-eval runs the same three steps in 15; the extra is
+    # headroom for the unpinned clone. Without a bound a hung clone would burn
+    # the 360-minute default every night.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: cometchat-mcp
+
+      # Blobless and sparse, as the Dockerfile's indexer stage clones it: the
+      # top-level files (docs.json), every .mdx page, and the .md files a page
+      # may import as a snippet (src/search/mdx-imports.ts takes either
+      # extension).
+      - uses: actions/checkout@v5
+        with:
+          repository: cometchat/docs
+          path: cometchat-docs
+          ref: main
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/*/
+            **/*.mdx
+            **/*.md
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: cometchat-mcp/package-lock.json
+
+      - name: Install
+        working-directory: cometchat-mcp
+        run: npm ci
+
+      - name: Build search index
+        working-directory: cometchat-mcp
+        env:
+          DOCS_REPO: ${{ github.workspace }}/cometchat-docs
+          INDEX_PATH: ${{ github.workspace }}/search-eval/index.sqlite
+        run: npm run build:index
+
+      - name: Score search ranking against docs main
+        working-directory: cometchat-mcp
+        shell: bash
+        env:
+          DOCS_REPO: ${{ github.workspace }}/cometchat-docs
+          INDEX_PATH: ${{ github.workspace }}/search-eval/index.sqlite
+        run: |
+          pinned=$(tr -d '[:space:]' < .github/eval-docs-commit)
+          head=$(git -C "$DOCS_REPO" rev-parse HEAD)
+          code=0
+          npm run --silent eval:search > eval.log 2>&1 || code=$?
+          {
+            echo "## Search eval on cometchat/docs main"
+            echo
+            echo "Docs main is \`$head\`; the eval is pinned to \`$pinned\`."
+            echo
+            case $code in
+              0) echo "No drift: $(tail -n 1 eval.log)" ;;
+              1) echo "Ranking drift: some checks fail on docs main." ;;
+              2) echo "Grounding drift: some cases name pages docs main no longer has." ;;
+              *) echo "The eval did not run (exit $code)." ;;
+            esac
+            echo
+            echo '```'
+            # Each failing check under its case, grounding problems, the tally.
+            awk '/^## /{c=$0} /^   FAIL/{if(c){print c; c=""} print} /^Golden expectations/{g=1} g||/checks passed/' eval.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat eval.log
+          case $code in
+            0) ;;
+            1) echo "::error::search ranking drift on docs main ($head): see the job summary" ;;
+            2) echo "::error::search eval grounding drift on docs main ($head): see the job summary" ;;
+            *) echo "::error::the search eval failed to run (exit $code)" ;;
+          esac
+          exit $code

@@ -73,16 +73,18 @@ ARG DOCS_REF=main
 # warm cache silently ship a stale index. (A moving ref such as "main" would
 # pass the guard but is a constant cache key, so don't.)
 ARG DOCS_COMMIT=unpinned
-# Sparse, blobless clone of top-level files + *.mdx anywhere ('/*' keeps root
-# files, '!/*/' drops directories, '**/*.mdx' re-includes the docs tree), then
-# check out exactly DOCS_COMMIT so the label on `full` matches what was indexed.
+# Sparse, blobless clone of top-level files + *.mdx and *.md anywhere ('/*'
+# keeps root files, '!/*/' drops directories, the two globs re-include the docs
+# tree; .md because a page may import one as a snippet, see
+# src/search/mdx-imports.ts), then check out exactly DOCS_COMMIT so the label
+# on `full` matches what was indexed.
 # tsx by path, not npx: if tsx were missing, npx in a non-TTY build installs
 # whatever tsx the registry serves instead of failing (refresher.ts uses the
 # same path).
 RUN test "${DOCS_COMMIT}" != "unpinned" || { echo "ERROR: --build-arg DOCS_COMMIT=<sha> is required for --target full"; exit 1; } \
     && echo "baking index: ${DOCS_REPO_URL}@${DOCS_REF} (${DOCS_COMMIT})" \
     && git clone --depth 1 --filter=blob:none --sparse --branch "${DOCS_REF}" "${DOCS_REPO_URL}" /tmp/docs \
-    && git -C /tmp/docs sparse-checkout set --no-cone '/*' '!/*/' '**/*.mdx' \
+    && git -C /tmp/docs sparse-checkout set --no-cone '/*' '!/*/' '**/*.mdx' '**/*.md' \
     && git -C /tmp/docs fetch --depth 1 origin "${DOCS_COMMIT}" \
     && git -C /tmp/docs checkout "${DOCS_COMMIT}" \
     && DOCS_REPO=/tmp/docs INDEX_PATH=/app/data/index.sqlite node_modules/.bin/tsx scripts/build-index.ts \

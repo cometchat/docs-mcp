@@ -65,7 +65,7 @@ Reach for this skill when the user wants to:
 ## Workflow
 
 1. **Orient.** Call `search_cometchat_docs` for any concept the user mentions you don't already know how to map.
-2. **Match the recipe.** Call `get_cometchat_implementation_bundle` with the bundle name from the table above. Bundles include working code, prerequisites, install commands, configuration, and reference links.
+2. **Match the recipe.** Call `get_cometchat_implementation_bundle` with the bundle name from the table above. Each bundle compiles the scenario's current docs pages (integration steps with code, then the platform's AI reference page), plus prerequisites and paths of related pages.
 3. **Verify edge details.** For specific behaviors (rate limits, exact API field names, version differences), call `fetch_cometchat_doc_page` with a path returned from search.
 4. **Apply.** Write the integration code in the user's project, using the bundle as the source of truth and the user's existing project structure as the constraint (existing router, env-var prefix, auth system).
 5. **Tell the user about production auth.** Auth Key is for development only. Production must mint Auth Tokens server-side via REST and call `loginWithAuthToken()`. This is the most common production gotcha — surface it before the user ships.

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { staleBundlePages } from "../src/bundles/versions.js";
 import {
   indexNavigation,
+  isInFolder,
   resolvePageVersion,
+  retiredFolders,
   versionFromPath,
   versionLabel,
 } from "../src/search/navigation.js";
@@ -185,6 +187,29 @@ describe("resolvePageVersion for pages outside the navigation", () => {
 
   it("falls back to the path for folders no versioned doc set owns", () => {
     expect(resolvePageVersion("/web-shared/theme", nav)).toEqual({ product: null, version: null, isCurrent: true });
+  });
+});
+
+describe("retiredFolders", () => {
+  it("finds an unlisted doc set that keeps its older versions in version folders", () => {
+    const retired = retiredFolders(
+      [
+        "ui-kit/kotlin/overview.mdx",
+        "ui-kit/kotlin/2.0/overview.mdx",
+        "ui-kit/react/v6/overview.mdx",
+        "sdk/unreal/drafts.mdx",
+      ],
+      nav,
+    );
+    // ui-kit/react is listed; sdk/unreal has no version folder.
+    expect([...retired]).toEqual(["ui-kit/kotlin"]);
+    expect(isInFolder("/ui-kit/kotlin/overview", retired)).toBe(true);
+    expect(isInFolder("/ui-kit/kotlin/2.0/overview", retired)).toBe(true);
+    expect(isInFolder("/ui-kit/kotlin-extras/overview", retired)).toBe(false);
+  });
+
+  it("finds none without a usable navigation", () => {
+    expect(retiredFolders(["ui-kit/kotlin/2.0/overview"], indexNavigation(null)).size).toBe(0);
   });
 });
 

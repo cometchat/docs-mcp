@@ -21,8 +21,22 @@ import { readdir, readFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { parseFrontmatter } from "../src/lib/frontmatter.js";
 import { SnippetInliner } from "../src/search/mdx-imports.js";
-import { indexNavigation, resolvePageVersion, type NavigationIndex } from "../src/search/navigation.js";
+import {
+  indexNavigation,
+  isInFolder,
+  resolvePageVersion,
+  retiredFolders,
+  type NavigationIndex,
+} from "../src/search/navigation.js";
 import { VERSION_LABEL_RE } from "../src/search/version.js";
+import {
+  FEATURE_KEYWORDS,
+  keywordRules,
+  pageKeywords,
+  REFERENCE_STUB_BODY,
+  type FeatureKeywords,
+} from "../src/search/keywords.js";
+import { indexedTitleKey } from "../src/search/phrasing.js";
 import Database from "better-sqlite3";
 
 const DOCS_REPO = process.env.DOCS_REPO ?? "../cometchat-docs-repo";
@@ -50,6 +64,12 @@ const SECTION_LABELS: Record<string, string> = {
 
 const VERSION_RE = /^v\d+(\.\d+)?$/i;
 
+// A per-doc-set machine-readable page index (/ui-kit/react/llms-react-v7).
+const DOCS_INDEX_PAGE_RE = /\/llms-[^/]*$/;
+
+// Below this much text a page answers nothing and is left out.
+const STUB_BODY_CHARS = 40;
+
 async function main() {
   const repoStat = await stat(DOCS_REPO).catch(() => null);
   if (!repoStat || !repoStat.isDirectory()) {
@@ -69,7 +89,11 @@ async function main() {
   // trails_fts holds each distinct product name once: a page points at its
   // navigation trail (trail_id) and its folder section (label_id), and the
   // search boosts it by how many query terms the better of the two matches
-  // (see src/search/sqlite.ts).
+  // (see src/search/sqlite.ts). keywords holds a page's search keywords
+  // (src/search/keywords.ts) as a JSON array, and languages the languages of
+  // its code examples (codeLanguages below): each searchable through its own
+  // FTS column, and never part of a snippet. title_key is the title as the
+  // search compares it with a query (src/search/phrasing.ts indexedTitleKey).
   db.exec(`
     DROP TABLE IF EXISTS pages_fts;
     DROP TABLE IF EXISTS trails_fts;
@@ -79,28 +103,31 @@ async function main() {
       path TEXT NOT NULL UNIQUE,
       url TEXT NOT NULL,
       title TEXT NOT NULL,
+      title_key TEXT NOT NULL DEFAULT '',
       section TEXT NOT NULL,
       product TEXT,
       version TEXT,
       is_current INTEGER NOT NULL DEFAULT 1,
       trail_id INTEGER NOT NULL,
       label_id INTEGER NOT NULL,
-      body TEXT NOT NULL
+      body TEXT NOT NULL,
+      keywords TEXT NOT NULL DEFAULT '[]',
+      languages TEXT NOT NULL DEFAULT ''
     );
     CREATE VIRTUAL TABLE pages_fts USING fts5(
-      title, body, section,
+      title, body, section, keywords, languages,
       content='pages', content_rowid='id', tokenize='porter unicode61'
     );
     CREATE VIRTUAL TABLE trails_fts USING fts5(trail, tokenize='porter unicode61');
     CREATE TRIGGER pages_ai AFTER INSERT ON pages BEGIN
-      INSERT INTO pages_fts(rowid, title, body, section)
-      VALUES (new.id, new.title, new.body, new.section);
+      INSERT INTO pages_fts(rowid, title, body, section, keywords, languages)
+      VALUES (new.id, new.title, new.body, new.section, new.keywords, new.languages);
     END;
   `);
 
   const insert = db.prepare(
-    `INSERT INTO pages (path, url, title, section, product, version, is_current, trail_id, label_id, body)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO pages (path, url, title, title_key, section, product, version, is_current, trail_id, label_id, body, keywords, languages)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertTrail = db.prepare(`INSERT INTO trails_fts (rowid, trail) VALUES (?, ?)`);
   const trailIds = new Map<string, number>();
@@ -115,9 +142,27 @@ async function main() {
   };
   const insertMany = db.transaction((rows: Row[]) => {
     for (const r of rows) {
-      const ids = [trailId(productTrail(r)), trailId(r.section)] as const;
+      // A retired doc set's pages keep their section ("UI Kit / Kotlin"), but
+      // point at an empty trail: no query word names their product, so the
+      // product boost never cancels their legacy factor.
+      const ids = r.retired
+        ? ([trailId(""), trailId("")] as const)
+        : ([trailId(productTrail(r)), trailId(r.section)] as const);
       try {
-        insert.run(r.path, r.url, r.title, r.section, r.product, r.version, r.isCurrent ? 1 : 0, ...ids, r.body);
+        insert.run(
+          r.path,
+          r.url,
+          r.title,
+          indexedTitleKey(r.title),
+          r.section,
+          r.product,
+          r.version,
+          r.isCurrent ? 1 : 0,
+          ...ids,
+          r.body,
+          r.keywords,
+          r.languages,
+        );
       } catch (err) {
         // Skip duplicates from differing-case path collisions.
         const msg = (err as Error).message;
@@ -133,6 +178,31 @@ async function main() {
 
   const rows: Row[] = [];
   const unsafeFrontmatter: string[] = [];
+  const inferred = retiredFolders(files.map((f) => path.relative(DOCS_REPO, f)), nav);
+  // Not listing a doc set is how the docs retire one, but it is also what an
+  // ordinary navigation restructure looks like, and a demoted set leaves the
+  // results altogether: its pages lose is_current and point at an empty trail,
+  // so every query about the product answers with a neighbouring one (React UI
+  // Kit unlisted -> "install react ui kit" returns only React Native pages).
+  // Nothing downstream would catch it: the refresher validates page counts, and
+  // one doc set's pages leaving the navigation stays under its drop ratio. So
+  // only an allowlisted set is demoted; the rest are reported and left current.
+  const retired = new Set([...inferred].filter((f) => KNOWN_RETIRED_DOC_SETS.has(f)));
+  const [known, unexpected] = partition([...inferred].sort(), (f) => KNOWN_RETIRED_DOC_SETS.has(f));
+  if (known.length > 0) console.error(`retired doc sets, indexed as older versions: ${known.join(", ")}`);
+  if (unexpected.length > 0) {
+    // Folder names are docs text, and the refresher logs this line: one line, capped.
+    const shown = unexpected.slice(0, 10).map((f) => Array.from(oneLine(f)).slice(0, 60).join(""));
+    const more = unexpected.length > 10 ? ` (and ${unexpected.length - 10} more)` : "";
+    console.error(
+      `WARNING: doc set(s) docs.json does not list, left current: ${shown.join(", ")}${more}; ` +
+        "add one to KNOWN_RETIRED_DOC_SETS in scripts/build-index.ts to index it as retired",
+    );
+  }
+  // Per keyword rule, the listed pages it reaches: current, and older.
+  const ruleReach = new Map<FeatureKeywords, { current: number; older: number }>(
+    FEATURE_KEYWORDS.map((rule) => [rule, { current: 0, older: 0 }]),
+  );
   for (const abs of files) {
     const rel = path.relative(DOCS_REPO, abs);
     if (rel.startsWith("node_modules/") || rel.startsWith("snippets/")) continue;
@@ -145,21 +215,51 @@ async function main() {
       continue;
     }
     const fm = parsed.data as Record<string, unknown>;
-    const body = stripMdx(await inliner.inline(parsed.content, abs));
-    if (body.trim().length < 40) continue;
+    const content = await inliner.inline(parsed.content, abs);
     const urlPath = "/" + rel.replace(/\.mdx$/, "");
+    // An llms-*.mdx page is a machine-readable index: a few kilobytes listing
+    // the title and description of every page in its doc set. Indexed whole it
+    // holds the words of all of them, so it took rank 1 on ordinary queries
+    // about the doc set ("angular ui kit guides", "flutter chat sdk send
+    // custom message type") ahead of the page that answers them, and every
+    // title it lists has its own indexed page anyway. The pages say in their
+    // own comments that they are meant to stay discoverable, so they are
+    // indexed by what they are — their title and frontmatter description —
+    // rather than dropped.
+    const description = typeof fm.description === "string" ? fm.description : "";
+    const indexPage = DOCS_INDEX_PAGE_RE.test(urlPath) && description.trim().length >= STUB_BODY_CHARS;
+    const body = indexPage ? description : stripMdx(content);
+    // Too little text to answer anything. An index page falls back to its full
+    // body rather than through this floor: dropping a page is not the point.
+    if (body.trim().length < STUB_BODY_CHARS) continue;
     const segments = urlPath.split("/").filter(Boolean);
     const section = sectionFor(segments);
-    const { product, version, isCurrent } = resolvePageVersion(urlPath, nav);
+    const resolved = resolvePageVersion(urlPath, nav);
+    const { product, version } = resolved;
+    // An unlisted page of a retired doc set is not current, whatever its path.
+    const isRetired = product === null && isInFolder(urlPath, retired);
+    const isCurrent = resolved.isCurrent && !isRetired;
+    const title = typeof fm.title === "string" ? fm.title : titleFromPath(urlPath);
+    const keywordOpts = {
+      path: urlPath,
+      openapi: typeof fm.openapi === "string",
+      // The same measure the stub factor reads back (length(pages.body)).
+      stub: body.length < REFERENCE_STUB_BODY,
+      listed: product !== null || nav.pages.size === 0,
+    };
+    for (const rule of keywordRules(title, keywordOpts)) ruleReach.get(rule)![isCurrent ? "current" : "older"]++;
     rows.push({
       path: urlPath,
       url: `${DOCS_BASE_URL}${urlPath}`,
-      title: typeof fm.title === "string" ? fm.title : titleFromPath(urlPath),
+      title,
       section,
       product,
       version,
       isCurrent,
+      retired: isRetired,
       body,
+      keywords: pageKeywords(title, keywordOpts),
+      languages: codeLanguages(content).join(" "),
     });
   }
 
@@ -192,6 +292,18 @@ async function main() {
         unsafeFrontmatter.slice(0, 10).map(oneLine).join(", "),
     );
   }
+  for (const [rule, reach] of ruleReach) {
+    // The rules key on page titles. When the docs retitle the current pages,
+    // only their older copies keep the keywords, and a keyword query then
+    // finds nothing current. Rules no page matches at all stay quiet: a
+    // small or partial docs repo has none of these pages.
+    if (reach.current === 0 && reach.older > 0) {
+      console.error(
+        `WARNING: search keyword rule ${rule.title} matches no current page, only ${reach.older} older one(s); ` +
+          "were the current pages retitled?",
+      );
+    }
+  }
   const unfilterable = [...new Set(rows.flatMap((r) => (r.version && !VERSION_LABEL_RE.test(r.version) ? [r.version] : [])))];
   if (unfilterable.length > 0) {
     // Stored and reported on results, but SearchInputSchema rejects them.
@@ -213,8 +325,23 @@ type Row = {
   product: string | null;
   version: string | null;
   isCurrent: boolean;
+  /** In a doc set docs.json no longer lists (see retiredFolders). */
+  retired: boolean;
   body: string;
+  /** Search keywords as a JSON array (src/search/keywords.ts). */
+  keywords: string;
+  /** The languages of the page's code examples, space-separated (codeLanguages). */
+  languages: string;
 };
+
+// Doc sets known to be retired: docs.json no longer lists them, and their
+// older versions sit in version folders (the Kotlin UI Kit: v3 at the root, v2
+// under 2.0/). Another set inferred to be retired is reported as a WARNING.
+const KNOWN_RETIRED_DOC_SETS = new Set(["ui-kit/kotlin"]);
+
+function partition<T>(items: T[], test: (item: T) => boolean): [T[], T[]] {
+  return [items.filter(test), items.filter((item) => !test(item))];
+}
 
 /**
  * docs.json navigation is the source of truth for versions. A repo without a
@@ -308,15 +435,157 @@ async function collectMdx(root: string): Promise<string[]> {
   return out;
 }
 
+// A closing "Next Steps" section links to other pages with a line about each
+// ("Edit sent messages in conversations" on the Delete Message page): indexed,
+// it matches queries about those pages instead of this one. It runs to the next
+// heading or the end of the page. stripMdx removes it only once code fences
+// are gone, so a "## Next steps" line in a fenced README example neither
+// starts nor ends it.
+const NEXT_STEPS_RE = /^#{1,6}[ \t]+next steps\b[^\n]*(?:\n(?!#{1,6}[ \t])[^\n]*)*/gim;
+
+// Code tabs and fences name the language of each example (<Tab title="Swift">,
+// ```kotlin), and stripMdx drops both: an iOS page read as text almost never
+// says "Swift". Each language a page's examples use is stored once, in the
+// `languages` column, so a query naming it matches the page without the count
+// weighing on bm25, and snippets (drawn from the body) never show the names as
+// if the page said them. JavaScript and TypeScript are left out: every web UI
+// Kit's examples use them, and in a query "javascript" names the JavaScript
+// SDK (the search widens "js" to it instead; see src/search/phrasing.ts).
+const CODE_LANGUAGES: Record<string, string> = {
+  swift: "Swift",
+  "objective-c": "Objective-C",
+  "objective c": "Objective-C",
+  objectivec: "Objective-C",
+  objc: "Objective-C",
+  kotlin: "Kotlin",
+  java: "Java",
+  dart: "Dart",
+};
+
+/**
+ * The languages a page's code tabs and fences name, each once — but only the
+ * ones the page is written in. A guide for one platform that quotes a single
+ * snippet of another is not about that other platform:
+ * /notifications/flutter-push-notifications-ios is a Flutter guide with one
+ * iOS AppDelegate block among four Dart ones, yet it was indexed "Dart Swift",
+ * and 46 pages outside /sdk/ios, /ui-kit/ios and /calls/ios claimed Swift the
+ * same way. A language is kept when it names LANGUAGE_MIN_BLOCKS of the
+ * page's blocks, or LANGUAGE_MIN_SHARE of the ones naming a language at all —
+ * so an iOS page showing Swift and Objective-C side by side keeps both, and a
+ * page whose only example is Swift keeps it, while a lone foreign snippet
+ * among a platform's own goes.
+ *
+ * Own properties of CODE_LANGUAGES only: a tab may be titled "Constructor".
+ */
+function codeLanguages(content: string): string[] {
+  const names = [
+    ...[...content.matchAll(/^[ \t]*```([A-Za-z-]+)/gm)].map((m) => m[1]),
+    // "Kotlin (XML Views)", "Java (User)": the language is the part before the parenthesis.
+    ...[...content.matchAll(/<Tab\s+title="([^"(]+)/g)].map((m) => m[1]),
+  ];
+  const counts = new Map<string, number>();
+  let blocks = 0;
+  for (const name of names) {
+    const key = name.trim().toLowerCase();
+    const language = Object.hasOwn(CODE_LANGUAGES, key) ? CODE_LANGUAGES[key] : undefined;
+    if (language) {
+      counts.set(language, (counts.get(language) ?? 0) + 1);
+      blocks++;
+    }
+  }
+  return [...counts]
+    .filter(([, n]) => n >= LANGUAGE_MIN_BLOCKS || n >= blocks * LANGUAGE_MIN_SHARE)
+    .map(([language]) => language)
+    .sort();
+}
+
+// How much of a page's code a language must account for to be one the page is
+// written in: two blocks, or a quarter of the ones naming a language. Blocks
+// in no tracked language (bash, json, the page's own framework) are not
+// counted, so a lone Swift example on an iOS page whose others are all shell
+// still makes the page a Swift page.
+const LANGUAGE_MIN_BLOCKS = 2;
+const LANGUAGE_MIN_SHARE = 0.25;
+
+// A compound identifier: camelCase, PascalCase or an acronym run into a word
+// ("markAsRead", "CometChat", "UIKitSettings").
+const COMPOUND_IDENTIFIER = /[a-z0-9][A-Z]|[A-Z]{2}[a-z]/;
+
+/**
+ * What inline code contributes to the indexed text: the API names in it.
+ * Current docs name their methods only in code ("Use `markAsRead()` to mark
+ * messages as read") where older versions wrote them in prose, so dropping
+ * inline code left a query naming an API matching only older pages. Only
+ * compound identifiers are kept: each is one token no prose query word
+ * collides with, whereas file paths, package names and commands
+ * (`chat_builder/lib/`, `npm install @cometchat/chat-uikit-react`) split into
+ * the common words every product page already repeats. A span made only of
+ * such identifiers stays as written, so snippets read `markAsRead()`.
+ * Fenced code blocks stay out: adding their identifiers measured worse.
+ * Inline code holding a JSX tag (`<CometChatMessageList />`) keeps the tag's
+ * name (tagName), the component a query names it by.
+ */
+function inlineCodeText(code: string): string {
+  const words = code.match(/[A-Za-z0-9]+/g) ?? [];
+  const identifiers = words.filter((w) => COMPOUND_IDENTIFIER.test(w));
+  if (identifiers.length === 0) return "";
+  return identifiers.length === words.length ? code.replace(/[*_~]/g, " ") : identifiers.join(" ");
+}
+
+// A JSX/HTML tag, fragment (<>, </>) or HTML comment. A "<" that starts none
+// of these is prose ("react >=18 <21"), not a tag: matched as one, it ran to
+// the next ">" anywhere on the page -- usually inside a code fence -- and the
+// unbalanced fences that left then dropped the prose between them instead of
+// the code (the React.js Integration page indexed only its inline code).
+const MDX_TAG_RE = /<(?:\/?[A-Za-z][^>]*|\/?|!--[\s\S]*?--)>/g;
+
+// A tab's title is a heading the page shows above its content, and some say
+// what no other text on the page does: the iOS UI Kit's install steps are tabs
+// titled "CocoaPods" and "Swift Package Manager", so "ios swift package
+// manager" found its getting-started page by one passing mention. Most tabs
+// name a language or file ("Kotlin", "JavaScript (User)", "App.tsx"), which
+// the languages column covers or which would only repeat across a doc set, so
+// a title is kept as text only when, without a parenthesized suffix, it is two
+// words or more and not a code language.
+// The title may follow other attributes and be quoted either way or written
+// as a string expression (title={"..."}).
+const TAB_TITLE_RE = /<Tab\b[^>]*?\btitle=(?:"([^"]*)"|'([^']*)'|\{\s*(?:"([^"]*)"|'([^']*)')\s*\})/g;
+
+// A tag in inline code is the API it names: `<CometChatMessageList />`,
+// `List<CometChatOption>`. Its name stays, its attributes go.
+function tagName(tag: string): string {
+  return ` ${/[A-Za-z][\w.]*/.exec(tag)?.[0] ?? ""} `;
+}
+
+// An MDX comment, {/* ... */}: never shown, and it may hold "<" or ">".
+const MDX_COMMENT_RE = /\{\/\*[\s\S]*?\*\/\}/g;
+
+function tabTitleText(title: string): string {
+  const head = title.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const words = head.split(/\s+/).filter(Boolean);
+  if (words.length < 2 || Object.hasOwn(CODE_LANGUAGES, head.toLowerCase())) return " ";
+  return ` ${head} `;
+}
+
 function stripMdx(content: string): string {
   return content
-    .replace(/<[^>]+>/g, " ")
+    // Code first: fences and inline spans hold "<" and ">" that are not tags
+    // (`Array<string>`, `a < b`), and a "<" left behind would run a tag
+    // match out of the span into the prose. A tag inside a span
+    // (`<CometChatMessageList />`) leaves its name (tagName).
     .replace(/```[\s\S]*?```/g, " ")
+    .replace(MDX_COMMENT_RE, " ")
+    .replace(/`([^`]*)`/g, (_span, code: string) => ` ${inlineCodeText(code.replace(MDX_TAG_RE, tagName))} `)
+    .replace(TAB_TITLE_RE, (tag, ...titles: unknown[]) => {
+      const title = titles.slice(0, 4).find((t): t is string => typeof t === "string") ?? "";
+      return `${tabTitleText(title)}${tag}`;
+    })
+    .replace(MDX_TAG_RE, " ")
+    .replace(NEXT_STEPS_RE, " ")
     // MDX ESM: an import/export at the start of a line runs to the next blank
     // line. A page that only imports a shared snippet must fall under the
     // stub floor, not be indexed with the import statement as its body.
     .replace(/^(?:import|export)[ \t].*(?:\n[ \t]*\S.*)*/gm, " ")
-    .replace(/`[^`]*`/g, " ")
     .replace(/\[(.+?)\]\([^)]+\)/g, "$1")
     .replace(/^#+\s*/gm, "")
     .replace(/[*_~]/g, "")

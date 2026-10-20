@@ -1,6 +1,6 @@
 {
   "name": "@cometchat/mcp-server",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "First-party CometChat MCP server. Read-only tools for searching CometChat documentation, fetching pages, and pulling implementation bundles.",
   "license": "Apache-2.0",
   "type": "module",
@@ -11,6 +11,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:index": "tsx scripts/build-index.ts",
+    "eval:search": "tsx scripts/eval-search.ts",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "test": "vitest run",
