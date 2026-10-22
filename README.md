@@ -5,6 +5,7 @@
 **Add real-time chat, voice, video, and moderation to your app through your AI coding agent.**
 
 [![CI](https://github.com/cometchat/docs-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/cometchat/docs-mcp/actions/workflows/ci.yml)
+[![Toolweather](https://toolweather.toolweather.workers.dev/badge/io.github.cometchat/docs-mcp.svg)](https://toolweather.pages.dev/servers/io.github.cometchat--docs-mcp/)
 [![Release](https://img.shields.io/github/v/release/cometchat/docs-mcp)](https://github.com/cometchat/docs-mcp/releases)
 [![MCP Registry](https://img.shields.io/badge/dynamic/json?label=MCP%20Registry&prefix=v&query=%24.servers%5B0%5D.server.version&url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dio.github.cometchat%2Fdocs-mcp%26version%3Dlatest&color=8A2BE2)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.cometchat/docs-mcp&version=latest)
 [![smithery badge](https://smithery.ai/badge/cometchat/docs-mcp)](https://smithery.ai/servers/cometchat/docs-mcp)
