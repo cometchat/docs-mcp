@@ -12,7 +12,7 @@
 
 # Node 24 (LTS) is the node-version CI tests on (.github/workflows/ci.yml);
 # keep the two in step. Node 20 reached end of life in April 2026.
-FROM node:24-bookworm-slim AS build
+FROM node:24.22.1-bookworm-slim AS build
 # Toolchain for native-module source builds (better-sqlite3 has no prebuilt
 # binaries on some architectures, e.g. linux/arm64).
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 make g++ >/dev/null \
@@ -31,7 +31,7 @@ RUN npm run build
 RUN npm prune --omit=dev --no-audit --no-fund
 
 # ── target: runtime ── app only, never touches the docs repo ────────────────
-FROM node:24-bookworm-slim AS runtime
+FROM node:24.22.1-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json package-lock.json ./
