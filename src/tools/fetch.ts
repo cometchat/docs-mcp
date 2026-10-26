@@ -10,7 +10,9 @@ export const FETCH_TOOL_DEFINITION = {
   name: FETCH_TOOL_NAME,
   title: "Fetch CometChat Documentation Page",
   description:
-    "Returns one CometChat documentation page in full, as markdown with its title, url and section. Takes a known url or path, such as a result url from search_cometchat_docs (which finds pages by topic) or a docs link in a bundle. Each call reads the live page from the docs site: moved pages are followed and set redirectedFrom, and pages over 50 KiB are truncated, ending with a link to the full page. Errors: not_found for an unknown page, invalid_input for a URL or path outside the docs, backend_unavailable when the docs site fails or times out (retryable).",
+    "Returns one CometChat documentation page in full, as markdown with its title, url and section. Takes a url or path already in hand: a docs link from a bundle, or a result url from search_cometchat_docs, which is where a topic or API name goes instead, since that is not a path.\n\n" +
+    "Each call reads the live docs site, so it sees pages the search index has not picked up yet. A moved page is followed for up to 3 redirects; a page over 50 KiB is truncated, ending in a link to the full page. No key or account is needed, and nothing is cached.\n\n" +
+    "Errors: not_found for an unknown page or one redirected to the docs root, invalid_input for a path resolving outside the documentation, backend_unavailable when the site fails or the whole redirect chain exceeds the 5 s default timeout (retryable).",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -27,14 +29,14 @@ export const FETCH_TOOL_DEFINITION = {
     type: "object" as const,
     properties: {
       title: { type: "string", description: "Page title." },
-      url: { type: "string", description: "Canonical page URL." },
-      section: { type: "string", description: "Documentation section the page belongs to." },
-      content: { type: "string", description: "Full page content as markdown (truncated if very large)." },
-      contentLength: { type: "number", description: "Content length in bytes after truncation." },
+      url: { type: "string", description: "Absolute canonical page url, after any redirect." },
+      section: { type: "string", description: "Documentation section, derived from the page's path." },
+      content: { type: "string", description: "Page body as markdown." },
+      contentLength: { type: "number", description: "Byte length of content, after any truncation." },
       redirectedFrom: {
         type: "string",
         description:
-          "Path originally requested, present only when that page has moved. url and section describe the page it moved to.",
+          "Path originally requested, present only when that page has moved; url and section describe where it landed.",
       },
     },
     required: ["title", "url", "section", "content", "contentLength"],
@@ -43,6 +45,8 @@ export const FETCH_TOOL_DEFINITION = {
   annotations: {
     title: "Fetch CometChat Documentation Page",
     readOnlyHint: true,
+    destructiveHint: false,
+    openWorldHint: true,
   },
 };
 
@@ -50,7 +54,8 @@ const HEADING_RE = /^#\s+(.+)$/m;
 // RFC 3986 scheme prefix: the input is a full URL rather than a docs path.
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 // Moved pages redirect to their new path; docs.json chains are at most 2 long.
-const MAX_REDIRECTS = 3;
+// Exported so tests/tools.test.ts pins the number the description quotes.
+export const MAX_REDIRECTS = 3;
 
 export type FetchOpts = {
   docsBaseUrl: string;

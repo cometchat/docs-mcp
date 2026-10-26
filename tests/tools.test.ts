@@ -10,8 +10,11 @@ import {
   BUNDLE_TOOL_DEFINITION,
   runBundle,
 } from "../src/tools/bundle.js";
-import { FETCH_TOOL_DEFINITION } from "../src/tools/fetch.js";
+import { FETCH_TOOL_DEFINITION, MAX_REDIRECTS } from "../src/tools/fetch.js";
 import { RELAX_MAX_TERMS, RELAX_MIN_TERMS } from "../src/search/sqlite.js";
+import { BUNDLE_MAX_BYTES, FETCH_MAX_BYTES, SNIPPET_MAX_CHARS } from "../src/lib/truncate.js";
+import { DEFAULT_TTL_MS } from "../src/bundles/loader.js";
+import { SearchInputSchema } from "../src/lib/validation.js";
 import { loadConfig } from "../src/config.js";
 import { SERVER_INSTRUCTIONS } from "../src/mcp.js";
 import { stubBundleStore } from "./helpers/bundles.js";
@@ -47,12 +50,56 @@ describe("tool definitions", () => {
     );
   });
 
+  it("search states the limit default the input schema applies", () => {
+    const applied = SearchInputSchema.parse({ query: "x" }).limit;
+    expect(SEARCH_TOOL_DEFINITION.inputSchema.properties.limit.default).toBe(applied);
+    expect(SEARCH_TOOL_DEFINITION.inputSchema.properties.limit.description).toContain(`default ${applied}`);
+  });
+
+  // The rest of the numbers a description quotes, pinned like the two above.
+  it("fetch states the redirect, size and timeout limits the code enforces", () => {
+    const d = FETCH_TOOL_DEFINITION.description;
+    expect(d).toContain(`up to ${MAX_REDIRECTS} redirects`);
+    expect(d).toContain(`over ${FETCH_MAX_BYTES / 1024} KiB is truncated`);
+    expect(d).toContain(`${loadConfig().fetchTimeoutMs / 1000} s default timeout`);
+  });
+
+  it("bundle states the size cap and the cache lifetime the store applies", () => {
+    const d = BUNDLE_TOOL_DEFINITION.description;
+    expect(d).toContain(`fits in ${BUNDLE_MAX_BYTES / 1024} KiB`);
+    expect(d).toContain(`served for ${DEFAULT_TTL_MS / 60_000} minutes`);
+  });
+
+  it("search states the snippet cap the code applies", () => {
+    expect(SEARCH_TOOL_DEFINITION.outputSchema.properties.results.items.properties.snippet.description).toContain(
+      `up to ${SNIPPET_MAX_CHARS} characters`,
+    );
+  });
+
   it("expose title + readOnlyHint annotations", () => {
     for (const t of [SEARCH_TOOL_DEFINITION, FETCH_TOOL_DEFINITION, BUNDLE_TOOL_DEFINITION, LIST_BUNDLES_TOOL_DEFINITION]) {
       expect(t.annotations.title.length).toBeGreaterThan(0);
       expect(t.annotations.readOnlyHint).toBe(true);
+      expect(t.annotations.destructiveHint).toBe(false);
       expect(t.name.length).toBeLessThanOrEqual(64);
+      // Glama reads the top-level title too, and scores it as meaningful only
+      // when it is longer than the name: "Get CometChat Implementation Bundle"
+      // was exactly as long as get_cometchat_implementation_bundle.
+      expect(t.title.length, t.name).toBeGreaterThan(t.name.length);
     }
+  });
+
+  // openWorldHint is a claim about the world the tool reads, and a description
+  // that contradicts it is worse than one that says nothing. fetch is the only
+  // tool that leaves the process (await fetch(mdUrl), src/tools/fetch.ts), so
+  // it is the only one allowed to say the world is open — and the only one
+  // that must not claim its result set is exhaustive.
+  it("declares openWorldHint true for the one tool that reads the live site", () => {
+    expect(FETCH_TOOL_DEFINITION.annotations.openWorldHint).toBe(true);
+    for (const t of [SEARCH_TOOL_DEFINITION, BUNDLE_TOOL_DEFINITION, LIST_BUNDLES_TOOL_DEFINITION]) {
+      expect(t.annotations.openWorldHint, t.name).toBe(false);
+    }
+    expect(FETCH_TOOL_DEFINITION.description).not.toMatch(/\b(?:every|all|the complete|exhaustive)\s+\w*\s*pages?\b/i);
   });
 
   // Anthropic Software Directory Policy 2.A-2.G. Every text a client reads from

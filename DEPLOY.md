@@ -39,7 +39,7 @@ The provided GitHub Actions workflow (`.github/workflows/ci.yml`) already does t
 
 ### Search ranking eval
 
-`npm run eval:search` scores ranking against the golden queries in `scripts/eval-search.ts` (`INDEX_PATH` is the index; with `DOCS_REPO` set it first checks that every page a case names exists). It exits 1 when a check fails and 2 when a case names a missing page.
+`npm run eval:search` scores ranking against the golden queries in `scripts/eval-search.ts` (`INDEX_PATH` is the index; with `DOCS_REPO` set it first checks that every page a case names exists). It exits 1 when a check fails, 2 when a case names a missing page, and 3 when the index cannot be scored at all (missing, or built by an older release that lacks this release's columns).
 
 CI runs it as the `search-eval` job in `ci.yml`, on the `cometchat/docs` commit pinned in `.github/eval-docs-commit`: a blobless, sparse checkout of the top-level files, `*.mdx` and `*.md`, as the Dockerfile clones it, then an index build and the eval. **A workflow job blocks a merge only once it is a required status check**, which lives in GitHub settings, not in this repository: add `search-eval` (with `test` and `index-refresh`) under Settings → Branches → the `main` protection rule, or the job goes red without stopping anything. A docs change therefore never fails a pull request. `search-eval-drift.yml` runs the same eval against docs `main` every day, gating nothing, and its job summary says whether main has drifted: exit 2 means a case names a page main moved or removed, exit 1 that a check fails on main's docs. Update the cases and bump the pin in the same change.
 
@@ -118,7 +118,7 @@ Structured JSON via `pino`. Log per tool invocation:
 With `INDEX_AUTO_REFRESH=true` the server keeps its own search index current
 without a redeploy. Every `INDEX_POLL_INTERVAL_MS` (default 10 min) it runs a
 `git ls-remote` against the public docs repo (~1s, anonymous, no credentials).
-When `HEAD` moves it sparse-clones only the `.mdx` blobs (~44 MB, ~2s), rebuilds
+When `HEAD` moves it sparse-clones only the `.mdx` and `.md` blobs (~44 MB, ~2s), rebuilds
 the index in a **child process** (~2s, ~245 MB peak, never blocking the event
 loop), validates it, and hot-swaps it in.
 
@@ -265,7 +265,7 @@ tool call never saw `initialize`. Correlate on `session_id` with
 
 Aggregate at the platform level (Datadog, CloudWatch, etc.) and watch for:
 
-- p95 tool latency > 1.5 s.
+- p95 tool latency > 1.5 s. Search runs on the event loop, and a long query of common words costs about 20 ms at `limit` 25 (0.1.7's relaxed matching scans the candidates twice when the window is full), so sustained search bursts show up as latency on every other request too.
 - `backend_unavailable` rate > 1% of calls.
 - Sustained `unknown_bundle` calls — signal that we're missing a popular scenario.
 

@@ -173,7 +173,7 @@ describe("eval-search exit codes", () => {
     expect(r.stdout).toMatch(/FAIL/);
   }, 60_000);
 
-  it("exits 2, naming the rebuild, when the index predates this release", () => {
+  it("exits 3, naming the rebuild, when the index predates this release", () => {
     const old = path.join(tmp, "old-index.sqlite");
     const db = new Database(old);
     db.exec(`
@@ -188,9 +188,17 @@ describe("eval-search exit codes", () => {
     `);
     db.close();
     const r = run({ INDEX_PATH: old, DOCS_REPO: "" });
-    expect(r.status).toBe(2);
+    expect(r.status).toBe(3);
     expect(r.stderr).toMatch(/built by an older release/);
     expect(r.stderr).toMatch(/keywords, title_key, languages/);
+    expect(r.stderr).toMatch(/scripts\/build-index\.ts/);
+    expect(r.stdout).not.toMatch(/FAIL/);
+  }, 60_000);
+
+  it("exits 3, naming the build, when there is no index at all", () => {
+    const r = run({ INDEX_PATH: path.join(tmp, "absent.sqlite"), DOCS_REPO: "" });
+    expect(r.status).toBe(3);
+    expect(r.stderr).toMatch(/No index at/);
     expect(r.stderr).toMatch(/scripts\/build-index\.ts/);
     expect(r.stdout).not.toMatch(/FAIL/);
   }, 60_000);

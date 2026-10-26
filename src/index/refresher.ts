@@ -283,8 +283,8 @@ export class IndexRefresher {
     const timeout = this.opts.cloneTimeoutMs ?? 180_000;
     // Never the repository of whatever process spawned us (see git-env.ts).
     const env = withoutGitRepoEnv();
-    // Blobless + sparse: fetches only mdx blobs (~44MB) instead of the full
-    // repo (~390MB of assets). `--` stops a hostile ref/url being read as a flag.
+    // Blobless + sparse: fetches only the .mdx and .md blobs (~44MB) instead of
+    // the full repo (~390MB of assets). `--` stops a hostile ref/url being read as a flag.
     await exec(
       "git",
       [

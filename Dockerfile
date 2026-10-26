@@ -45,8 +45,9 @@ COPY --from=build /app/scripts ./scripts
 # every index build fails with ERR_MODULE_NOT_FOUND.
 COPY --from=build /app/src ./src
 # git is required at RUNTIME for the in-container index refresh
-# (INDEX_AUTO_REFRESH): the sparse, blobless clone fetches only mdx blobs
-# (~44MB) — a codeload tarball of the docs repo is ~390MB and cannot be filtered.
+# (INDEX_AUTO_REFRESH): the sparse, blobless clone fetches only the .mdx and
+# .md blobs (~44MB) — a codeload tarball of the docs repo is ~390MB and cannot
+# be filtered.
 RUN apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends git ca-certificates >/dev/null \
     && rm -rf /var/lib/apt/lists/*

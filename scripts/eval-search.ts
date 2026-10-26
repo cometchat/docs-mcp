@@ -291,10 +291,9 @@ export const CASES: GoldenCase[] = [
 
 /**
  * Search issues fixed in 0.1.7, each case a query from the report and the page
- * it should reach: receipts toggles (Slack), language aliases (ENG-39513),
- * delete/edit wording (ENG-39514), APIs only older docs spell out
- * (ENG-39515) and plain-language phrasings (ENG-39516), plus guards that the
- * fixes must not break, and guards for what the 0.1.7 review found.
+ * it should reach: receipts toggles, language aliases, delete/edit wording,
+ * APIs only older docs spell out and plain-language phrasings, plus guards
+ * that the fixes must not break, and guards for what the 0.1.7 review found.
  */
 // A current, navigable page: no older-version folder, except /sdk/android/v5/,
 // which docs.json lists as current ahead of the unversioned (older) Android
@@ -857,11 +856,18 @@ function verifyGrounding(): void {
 /**
  * An index built before this release has none of the search text these cases
  * score — every keyword, title-key and language check fails at once, which
- * reads like a ranking regression rather than a stale file. Exit 2, the code
- * that already means "the environment is wrong", and say how to rebuild.
+ * reads like a ranking regression rather than a stale file. Exit 3, a code of
+ * its own (1 is a failed check, 2 a case the docs no longer ground), and say
+ * how to rebuild. A missing index exits 3 for the same reason.
  */
 function verifyIndexSchema(): void {
-  if (!existsSync(INDEX_PATH)) return; // the client reports a missing index itself
+  if (!existsSync(INDEX_PATH)) {
+    console.error(
+      `No index at ${INDEX_PATH}. Build one from a docs checkout, then run the eval again:\n` +
+        `  DOCS_REPO=<docs checkout> INDEX_PATH=${INDEX_PATH} npx tsx scripts/build-index.ts`,
+    );
+    process.exit(3);
+  }
   const db = new Database(INDEX_PATH, { readonly: true, fileMustExist: true });
   try {
     const columns = new Set((db.prepare("PRAGMA table_info(pages)").all() as { name: string }[]).map((c) => c.name));
@@ -878,7 +884,7 @@ function verifyIndexSchema(): void {
         `  DOCS_REPO=<docs checkout> INDEX_PATH=${INDEX_PATH} npx tsx scripts/build-index.ts\n` +
         "The docs commit CI scores against is pinned in .github/eval-docs-commit.",
     );
-    process.exit(2);
+    process.exit(3);
   } finally {
     db.close();
   }

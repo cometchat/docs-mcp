@@ -32,7 +32,7 @@ export type BuildResult = {
   empty: boolean;
 };
 
-const DEFAULT_TTL_MS = 10 * 60 * 1000;
+export const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_RETRY_BASE_MS = 30 * 1000;
 // The docs .md export starts every page with this blockquote pointing at
 // llms.txt. Only that block is stripped: a page may open with a real callout.

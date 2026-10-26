@@ -50,6 +50,28 @@ describe("list_cometchat_bundles", () => {
     }
   });
 
+  // The description opens with a count ("Eleven bundles cover...") and the
+  // list tool's framework field names its values by hand. Both are facts about
+  // the manifest, so both are tied to it: adding a bundle, or one with a new
+  // framework, fails here rather than in a directory review.
+  const COUNT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+
+  it("states the number of bundles the store actually holds", () => {
+    const store = stubBundleStore();
+    const word = COUNT_WORDS[store.list().length];
+    expect(word, `no word for ${store.list().length} bundles`).toBeDefined();
+    const Word = word[0].toUpperCase() + word.slice(1);
+    expect(BUNDLE_TOOL_DEFINITION.description).toContain(`${Word} bundles cover`);
+  });
+
+  it("names every framework the store holds, and no other", () => {
+    const store = stubBundleStore();
+    const described = LIST_BUNDLES_TOOL_DEFINITION.outputSchema.properties.bundles.items.properties.framework.description;
+    const listed = described.replace(/^One of\s+|\.$/g, "").split(/,\s*(?:or\s+)?/).map((s) => s.trim());
+    const held = [...new Set(runListBundles(store).bundles.map((b) => b.framework))].sort();
+    expect([...listed].sort()).toEqual(held);
+  });
+
   it("takes no arguments", () => {
     expect(LIST_BUNDLES_TOOL_DEFINITION.inputSchema.properties).toEqual({});
   });

@@ -9,6 +9,15 @@ name: Search eval drift
 #           or rename). Update the case and bump the pin together.
 #   exit 1  ranking drift: on main's docs some check fails that passes on the
 #           pinned commit. Fix the ranking or the case, then bump the pin.
+#   exit 3  the index could not be scored (not built, or an older schema):
+#           a job problem, not drift.
+#
+# A red scheduled run notifies nobody, so drift also opens an issue labelled
+# search-eval-drift, appends to it on later days while the drift persists,
+# and closes it on the first clean run. That is the one write this workflow
+# makes; it still needs no secret beyond the job token. The file syncs to the
+# public mirror (ci.yml and DEPLOY.md name it), so the job runs only in the
+# private repository: the mirror has nobody to act on the issue.
 
 on:
   schedule:
@@ -17,9 +26,11 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   eval-docs-main:
+    if: github.repository == 'cometchat-team/docs-mcp'
     runs-on: ubuntu-latest
     # ci.yml's search-eval runs the same three steps in 15; the extra is
     # headroom for the unpinned clone. Without a bound a hung clone would burn
@@ -65,6 +76,7 @@ jobs:
         run: npm run build:index
 
       - name: Score search ranking against docs main
+        id: score
         working-directory: cometchat-mcp
         shell: bash
         env:
@@ -75,6 +87,7 @@ jobs:
           head=$(git -C "$DOCS_REPO" rev-parse HEAD)
           code=0
           npm run --silent eval:search > eval.log 2>&1 || code=$?
+          # The same report feeds the job summary and the drift issue.
           {
             echo "## Search eval on cometchat/docs main"
             echo
@@ -84,6 +97,7 @@ jobs:
               0) echo "No drift: $(tail -n 1 eval.log)" ;;
               1) echo "Ranking drift: some checks fail on docs main." ;;
               2) echo "Grounding drift: some cases name pages docs main no longer has." ;;
+              3) echo "The index could not be scored (exit 3): a job problem, not drift." ;;
               *) echo "The eval did not run (exit $code)." ;;
             esac
             echo
@@ -91,12 +105,62 @@ jobs:
             # Each failing check under its case, grounding problems, the tally.
             awk '/^## /{c=$0} /^   FAIL/{if(c){print c; c=""} print} /^Golden expectations/{g=1} g||/checks passed/' eval.log
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > "$RUNNER_TEMP/drift.md"
+          cat "$RUNNER_TEMP/drift.md" >> "$GITHUB_STEP_SUMMARY"
           cat eval.log
+          {
+            echo "code=$code"
+            echo "head=$head"
+            echo "pinned=$pinned"
+          } >> "$GITHUB_OUTPUT"
           case $code in
             0) ;;
             1) echo "::error::search ranking drift on docs main ($head): see the job summary" ;;
             2) echo "::error::search eval grounding drift on docs main ($head): see the job summary" ;;
+            3) echo "::error::the search eval could not score the index (exit 3): see the job summary" ;;
             *) echo "::error::the search eval failed to run (exit $code)" ;;
           esac
           exit $code
+
+      # Runs whether the score step passed or failed, but only when it produced
+      # a drift verdict: a checkout or install failure, or an unscorable
+      # index, is a job problem and gets no issue.
+      - name: Open, update or close the drift issue
+        if: always() && (steps.score.outputs.code == '0' || steps.score.outputs.code == '1' || steps.score.outputs.code == '2')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CODE: ${{ steps.score.outputs.code }}
+          HEAD: ${{ steps.score.outputs.head }}
+          PINNED: ${{ steps.score.outputs.pinned }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LABEL: search-eval-drift
+        run: |
+          set -euo pipefail
+          gh label create "$LABEL" --description "The daily search eval fails on docs main" --color D93F0B 2>/dev/null || true
+          open=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')
+          {
+            cat "$RUNNER_TEMP/drift.md"
+            echo
+            echo "Run: $RUN_URL"
+          } > "$RUNNER_TEMP/issue.md"
+          case "$CODE" in
+            0)
+              if [ -n "$open" ]; then
+                gh issue close "$open" --comment "Clean run against docs main \`$HEAD\` (pinned \`$PINNED\`): no drift. $RUN_URL"
+                echo "closed #$open"
+              else
+                echo "no drift, no open issue"
+              fi
+              ;;
+            *)
+              if [ -n "$open" ]; then
+                gh issue comment "$open" --body-file "$RUNNER_TEMP/issue.md"
+                echo "appended to #$open"
+              else
+                kind=$([ "$CODE" = 2 ] && echo "grounding" || echo "ranking")
+                gh issue create --title "Search eval: $kind drift on docs main" --label "$LABEL" --body-file "$RUNNER_TEMP/issue.md"
+              fi
+              ;;
+          esac
