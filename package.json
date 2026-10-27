@@ -27,7 +27,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
     "gray-matter": "^4.0.3",

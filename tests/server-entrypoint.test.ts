@@ -313,8 +313,11 @@ describe("POST /mcp — 4mb body limit (Express 5)", () => {
     "does not let %s carry an over-limit body past the cap",
     async (contentType) => {
       const res = await post(contentType, initialize(OVER_LIMIT_PAD));
-      expect(res.status, res.text).toBe(400);
-      expect(res.text).toContain("Invalid JSON-RPC message");
+      // SDK 1.30+ rejects a non-JSON Content-Type at the media-type layer with
+      // 415 (Unsupported Media Type), before the body is read — so an over-limit
+      // body on a bogus Content-Type is refused even earlier than the 4 MB cap.
+      expect(res.status, res.text).toBe(415);
+      expect(res.text).toContain("Unsupported Media Type");
       expect(res.text).not.toContain("serverInfo");
       expect(res.sessionId).toBeUndefined();
     },
