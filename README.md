@@ -11,7 +11,7 @@
 [![docs-mcp MCP server](https://glama.ai/mcp/servers/cometchat/docs-mcp/badges/score.svg)](https://glama.ai/mcp/servers/cometchat/docs-mcp)
 [![Listed on ClaudePluginHub](https://www.claudepluginhub.com/badge/cometchat-cometchat)](https://www.claudepluginhub.com/plugins/cometchat-cometchat?ref=badge)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
-[![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-2025--06--18-purple)](https://modelcontextprotocol.io)
+[![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-2025--11--25-purple)](https://modelcontextprotocol.io)
 [![Status](https://img.shields.io/badge/status-live-brightgreen)](https://mcp.cometchat.com/health)
 
 [**Docs**](https://www.cometchat.com/docs/mcp-server) • [**CometChat**](https://www.cometchat.com) • [**Get an account (free, 100 MAU)**](https://app.cometchat.com)
@@ -45,8 +45,8 @@ Ask the agent: *"add a chat tab where users can DM each other"* — it reads Com
 | **Windsurf** | Plugins (hammer icon) → Manage plugins → View raw config → paste config below |
 | **VS Code (Copilot Agent)** | `Cmd+Shift+P` → MCP: Add MCP Server → URL: `https://mcp.cometchat.com/mcp`, Transport: HTTP |
 | **Claude Code (CLI)** | `claude mcp add --transport http cometchat https://mcp.cometchat.com/mcp` |
-| **Smithery** | `npx -y smithery mcp add cometchat/docs-mcp` |
-| **Codex CLI** | `codex plugin marketplace add cometchat/docs-mcp` |
+| **Claude Code** (plugin) | `claude plugin marketplace add cometchat/docs-mcp && claude plugin install cometchat@cometchat` |
+| **Codex CLI** (plugin) | `codex plugin marketplace add cometchat/docs-mcp && codex plugin add cometchat@cometchat` |
 
 ### Config snippet (Cursor / Windsurf / generic MCP clients)
 
@@ -133,7 +133,7 @@ CometChat is a real-time communications platform for adding chat, voice, and vid
 |---|---|
 | Display name | CometChat Docs |
 | Version | 0.1.7 |
-| Protocol | MCP `2025-06-18` |
+| Protocol | MCP `2025-11-25`; earlier protocol versions are negotiated down |
 | Transport | Streamable HTTP (with SSE) |
 | Authentication | None (public docs only) |
 | Capabilities | `tools`, `resources` |
@@ -261,16 +261,20 @@ See [`DEPLOY.md`](./DEPLOY.md) for container build, environment, and platform no
 
 ## Marketplaces
 
-The same server URL is listed across multiple agent marketplaces:
+The same server URL is listed in these registries and directories:
 
-| Marketplace | Listing |
+| Listing | Where |
 |---|---|
+| Official MCP Registry | [`io.github.cometchat/docs-mcp`](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.cometchat/docs-mcp&version=latest) |
+| GitHub MCP Registry | [`github.com/mcp/cometchat/docs-mcp`](https://github.com/mcp/cometchat/docs-mcp) |
+| Claude connector directory | [`claude.com/marketplace/connectors/cometchat`](https://claude.com/marketplace/connectors/cometchat) |
+| Cursor Directory | [`cursor.directory/plugins/cometchat`](https://cursor.directory/plugins/cometchat) |
 | Smithery | [`smithery.ai/servers/cometchat/docs-mcp`](https://smithery.ai/servers/cometchat/docs-mcp) |
 | Glama | [`glama.ai/mcp/servers/cometchat/docs-mcp`](https://glama.ai/mcp/servers/cometchat/docs-mcp) |
-| Cursor Marketplace | `cursor.com/marketplace` |
-| Cursor Directory | `cursor.directory` |
-| Anthropic Connector Directory | `claude.com/connectors` |
-| Codex Marketplace | `codex-marketplace.com` |
+| mcp.so | [`mcp.so/servers/docs-mcp-cometchat`](https://mcp.so/servers/docs-mcp-cometchat) |
+| PulseMCP | [`pulsemcp.com/servers/cometchat-docs`](https://www.pulsemcp.com/servers/cometchat-docs) |
+| LightNow | [`lightnow.ai/servers/io.github.cometchat/docs-mcp`](https://lightnow.ai/servers/io.github.cometchat/docs-mcp) |
+| ClaudePluginHub | [`claudepluginhub.com/plugins/cometchat-cometchat`](https://www.claudepluginhub.com/plugins/cometchat-cometchat) |
 
 ---
 
