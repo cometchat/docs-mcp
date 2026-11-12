@@ -5,6 +5,8 @@ import { SqliteSearchClient } from "./search/sqlite.js";
 import { BundleStore } from "./bundles/loader.js";
 import { ResourceRegistry } from "./resources/registry.js";
 import { buildMcpServer, SERVER_VERSION } from "./mcp.js";
+import { DashboardClient } from "./dashboard/client.js";
+import { actorId, READ_SCOPE, WRITE_SCOPE } from "./tools/dashboard/index.js";
 
 // Stdio entrypoint: `node dist/stdio.js`. Speaks MCP over stdin/stdout for
 // local clients and sandboxes (e.g. Glama's mcp-proxy inspection). Logs go to
@@ -16,7 +18,28 @@ async function main() {
   const bundleStore = BundleStore.fromDocs({ docsBaseUrl: config.docsBaseUrl, timeoutMs: config.fetchTimeoutMs });
   const resources = await ResourceRegistry.load(config.skillsDir, bundleStore);
 
-  const server = buildMcpServer({ config, searchClient, bundleStore, resources });
+  // Local use: a dashboard token from the environment turns on the account tools
+  // (the hosted server gets one per user through OAuth instead).
+  const dashboardToken = process.env.COMETCHAT_DASHBOARD_TOKEN?.trim();
+  const server = buildMcpServer({
+    config,
+    searchClient,
+    bundleStore,
+    resources,
+    ...(dashboardToken
+      ? {
+          dashboard: {
+            client: new DashboardClient({ apiHost: config.dashboardApiHost, token: dashboardToken }),
+            // COMETCHAT_DASHBOARD_READ_ONLY=true limits a local session to read tools.
+            scopes: new Set(process.env.COMETCHAT_DASHBOARD_READ_ONLY === "true" ? [READ_SCOPE] : [READ_SCOPE, WRITE_SCOPE]),
+            readOnly: config.dashboardReadOnly,
+            local: true,
+            actor: actorId(`stdio:${dashboardToken}`),
+            writesPerMinute: config.dashboardWritesPerMinute,
+          },
+        }
+      : {}),
+  });
   const transport = new StdioServerTransport();
   await server.connect(transport);
   logger.info(

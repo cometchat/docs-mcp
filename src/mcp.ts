@@ -37,12 +37,22 @@ import {
   LIST_BUNDLES_TOOL_NAME,
   runListBundles,
 } from "./tools/list-bundles.js";
+import { DASHBOARD_TOOL_NAMES, runDashboardTool, signInDashboardTools, visibleDashboardTools, type DashboardSession } from "./tools/dashboard/index.js";
+import { DashboardAuthError } from "./lib/errors.js";
 
 export const SERVER_NAME = "CometChat Docs";
 export const SERVER_VERSION = readPackageVersion();
 
 export const SERVER_INSTRUCTIONS =
   "Use this server to integrate CometChat — real-time chat, voice/video, and moderation — into web and mobile apps. Read the cometchat://skills/overview resource first for orientation. Use search_cometchat_docs for conceptual queries, fetch_cometchat_doc_page to read a specific page, and get_cometchat_implementation_bundle for ready-to-use recipes (React, Angular, React Native, Flutter, iOS, Android, JavaScript SDK, widget, moderation, multi-tenant, presence). Call list_cometchat_bundles to discover which bundles exist.";
+
+export const DASHBOARD_INSTRUCTIONS =
+  " This connection is also signed in to the user's CometChat account. Use the cometchat_ tools to read and manage it: apps and credentials, features, API keys, webhooks, users, groups, messages, moderation, push setup, roles, team, usage and call logs. Start with cometchat_whoami and cometchat_list_apps. Write credentials and keys to env files; never echo them. Ask the user before any change to their account; tools that change existing data or access return a summary instead of acting until you pass confirm: true, which you may only do after the user agrees. Deletes (cometchat_delete_*) can't be undone: before one, tell the user exactly what will be deleted and get their explicit OK.";
+
+// For /mcp before sign-in (DASHBOARD_ON_MCP): the account tools are listed, and
+// the first one called makes the client sign in.
+export const DASHBOARD_SIGNIN_INSTRUCTIONS =
+  " The cometchat_ tools read and manage the user's CometChat account: apps and credentials, features, API keys, webhooks, users, groups, messages, moderation, push setup, roles, team, usage and call logs. The first one you call asks the user to sign in to CometChat in their browser; the docs tools never need sign-in. Start with cometchat_whoami and cometchat_list_apps. Write credentials and keys to env files; never echo them. Ask the user before any change to their account; tools that change existing data or access return a summary instead of acting until you pass confirm: true, which you may only do after the user agrees. Deletes (cometchat_delete_*) can't be undone: before one, tell the user exactly what will be deleted and get their explicit OK.";
 
 export interface McpServerDeps {
   config: Config;
@@ -53,6 +63,10 @@ export interface McpServerDeps {
   attribution?: Attribution;
   /** Per-call analytics hook (ENG-37102); absent on stdio. */
   telemetry?: ToolCallTelemetry;
+  /** Signed-in dashboard access. When absent, the account tools aren't offered (unless offerDashboardSignIn). */
+  dashboard?: DashboardSession;
+  /** Not signed in, but list the account tools anyway; calling one gets a sign-in challenge before it reaches here. */
+  offerDashboardSignIn?: boolean;
 }
 
 export interface ToolCallInfo {
@@ -70,7 +84,7 @@ export interface ToolCallTelemetry {
 // Transport-agnostic MCP server wiring, shared by the Streamable HTTP entry
 // (server.ts) and the stdio entry (stdio.ts).
 export function buildMcpServer(deps: McpServerDeps): Server {
-  const { config, searchClient, bundleStore, resources, attribution, telemetry } = deps;
+  const { config, searchClient, bundleStore, resources, attribution, telemetry, dashboard, offerDashboardSignIn } = deps;
 
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -82,7 +96,11 @@ export function buildMcpServer(deps: McpServerDeps): Server {
         // session to notify anyway.
         resources: { listChanged: false },
       },
-      instructions: SERVER_INSTRUCTIONS,
+      instructions: dashboard
+        ? SERVER_INSTRUCTIONS + DASHBOARD_INSTRUCTIONS
+        : offerDashboardSignIn
+          ? SERVER_INSTRUCTIONS + DASHBOARD_SIGNIN_INSTRUCTIONS
+          : SERVER_INSTRUCTIONS,
     },
   );
 
@@ -92,6 +110,7 @@ export function buildMcpServer(deps: McpServerDeps): Server {
       FETCH_TOOL_DEFINITION,
       BUNDLE_TOOL_DEFINITION,
       LIST_BUNDLES_TOOL_DEFINITION,
+      ...(dashboard ? visibleDashboardTools(dashboard) : offerDashboardSignIn ? signInDashboardTools(config.dashboardReadOnly) : []),
     ],
   }));
 
@@ -154,6 +173,17 @@ export function buildMcpServer(deps: McpServerDeps): Server {
           result = runListBundles(bundleStore);
           break;
         default:
+          if (DASHBOARD_TOOL_NAMES.has(name)) {
+            if (!dashboard) {
+              throw new DashboardAuthError(
+                config.dashboardEnabled
+                  ? "This tool needs a signed-in CometChat account, and this server doesn't offer the account tools on /mcp (DASHBOARD_ON_MCP=false)."
+                  : "This tool needs a signed-in CometChat account, and account tools are not enabled on this server.",
+              );
+            }
+            result = await runDashboardTool(name, args, dashboard);
+            break;
+          }
           // Unknown tool is a protocol error (-32602), not a tool-result error
           // (matches the SDK's own McpServer behavior).
           throw new McpError(ErrorCode.InvalidParams, `Tool ${name} not found`);
@@ -194,17 +224,17 @@ export function buildMcpServer(deps: McpServerDeps): Server {
         bundle_id: bundleId,
         error_code: structured.code,
       });
-      return errorResult(structured.message, structured.code);
+      return errorResult(structured.message, structured.code, structured.details);
     }
   });
 
   return server;
 }
 
-function errorResult(message: string, code = "error") {
+function errorResult(message: string, code = "error", details?: Record<string, unknown>) {
   return {
     isError: true,
-    content: [{ type: "text", text: JSON.stringify({ error: { code, message } }) }],
+    content: [{ type: "text", text: JSON.stringify({ error: { code, message, ...(details ? { details } : {}) } }) }],
   };
 }
 

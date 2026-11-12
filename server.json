@@ -2,19 +2,21 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.cometchat/docs-mcp",
   "title": "CometChat Docs",
-  "description": "CometChat docs search + implementation bundles: add chat, voice, video & moderation to your app.",
+  "description": "CometChat docs and recipes, plus your account after sign-in: apps, users, settings, keys, webhooks.",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/cometchat/docs-mcp/main/assets/logo.svg",
       "mimeType": "image/svg+xml",
-      "sizes": ["any"]
+      "sizes": [
+        "any"
+      ]
     }
   ],
   "repository": {
     "url": "https://github.com/cometchat/docs-mcp",
     "source": "github"
   },
-  "version": "0.1.7",
+  "version": "0.2.0",
   "websiteUrl": "https://www.cometchat.com/docs/mcp-server",
   "remotes": [
     {

@@ -24,7 +24,7 @@ CometChat's first-party MCP server. Connect Claude, Cursor, Windsurf, VS Code Co
 
 Ask the agent: *"add a chat tab where users can DM each other"* — it reads CometChat's documentation, picks the right components for your stack, and writes the integration code.
 
-**Read-only. No account, no API key, no authentication required.**
+**One endpoint, `/mcp`.** The docs tools are read-only, with no account, API key or authentication. Account tools (your apps, users, settings) need you to sign in with your CometChat account: your client asks you to sign in the first time you use one. See [Account tools](#account-tools-sign-in).
 
 ---
 
@@ -132,10 +132,10 @@ CometChat is a real-time communications platform for adding chat, voice, and vid
 | Field | Value |
 |---|---|
 | Display name | CometChat Docs |
-| Version | 0.1.7 |
+| Version | 0.2.0 |
 | Protocol | MCP `2025-11-25`; earlier protocol versions are negotiated down |
 | Transport | Streamable HTTP (with SSE) |
-| Authentication | None (public docs only) |
+| Authentication | None for the docs tools. OAuth 2.1 sign-in with your CometChat account for the account tools, on the same `/mcp` endpoint |
 | Capabilities | `tools`, `resources` |
 | Health endpoint | `GET https://mcp.cometchat.com/health` |
 
@@ -161,6 +161,8 @@ Your agent (Claude / Cursor / Windsurf / …)
 ---
 
 ## Local development
+
+**Node.js:** running the server needs Node 20 or later. Developing and running the tests need **Node 20.19+ or 22.12+**, because the test toolchain (Vitest, Vite and Rolldown) won't start on earlier releases. CI uses Node 24.
 
 ```bash
 # Clone the docs repo (used to build the search index)
@@ -286,22 +288,42 @@ The same server URL is listed in these registries and directories:
 
 ---
 
+## Account tools (sign-in)
+
+`https://mcp.cometchat.com/mcp` also has tools for your CometChat account, after you sign in: list and create apps, read credentials, turn features on, manage users, groups, API keys and webhooks, delete users, groups, messages and other data, and check usage and moderation. It's off until CometChat enables it on the hosted server.
+
+**What it can and can't do.** When you connect, the sign-in page lists what the tool will be able to do. It can delete users, groups, messages, API keys, webhooks, roles, moderation lists and rules, and push providers, always after your approval. It can't delete apps, change billing, transfer ownership or ban users. A read-only connection can still read your app credentials, including the Auth Key; other API key values are masked.
+
+**Unverified apps.** Anyone can register a client with any name. If the address your browser returns to isn't a known AI tool (one running on your machine, or claude.ai's own connector callback), the page marks it **unverified** and it only gets read-only access. The page shows the app's icon: ours for a known app (by where it returns to, not its name), otherwise the logo the app registered (never for an unverified app), otherwise the first letter of its name. The icon only helps you recognise the app; the name and the return address are what to check.
+
+**High-risk changes need your approval in the browser.** Creating webhooks, API keys or login tokens, inviting team members, changing app settings, replacing the OpenAI key and every delete each give your AI tool a link. Open it in the browser where you connected your AI tool, check the exact details, and approve; you get a short code to give back to your AI tool. The code works once, for that exact change, for up to 10 minutes. This guards against text inside your app (a message, a user name) talking your AI tool into one of these changes. Only approve changes you asked for, and only sign in to CometChat from a link your own AI tool opened when you connected it. Secret values on the approval page show only their last 4 characters. If your AI tool can control your browser, it could also press Approve, so don't rely on approval in that setup. Other changes ask for your OK in the chat.
+
+**Disconnecting.** Remove the CometChat connection in your AI tool (Claude Code: `/mcp`, pick it, **Clear authentication**). That stops that tool. A sign-in copied off your device keeps working until it expires (access tokens last 1 hour, a sign-in at most 7 days); changing your CometChat password cuts off every copy within an hour. Step-by-step help: `https://mcp.cometchat.com/oauth/cometchat/disconnect`.
+
+**For admins.** There's no organisation-wide switch to block account sign-ins yet. To cut off a person's sign-ins straight away, contact CometChat support.
+
+---
+
 ## Contributing
 
 PRs welcome — especially:
 
 - **New implementation bundles**: add an entry to `src/bundles/manifest.ts` listing existing docs pages. If no page covers the scenario, write the page in [`cometchat/docs`](https://github.com/cometchat/docs) first; bundle content always comes from the docs.
-- **Tool improvements** behind the existing read-only contract.
+- **Tool improvements**: docs tools stay read-only; account tools keep the sign-in, confirmation and approval rules in [Account tools](#account-tools-sign-in).
 
-Out of scope today:
-- Tools that write to a customer's CometChat app (separate authenticated connector, on the roadmap).
-- Mixed read/write tools (Anthropic auto-rejection rule).
+Out of scope:
+- Account tools that delete apps, change billing, transfer ownership or ban users.
+- Mixed read/write tools (each tool is either read-only or a write).
 
 ---
 
 ## Privacy
 
-The CometChat MCP server is **read-only** and requires no account, API key, or authentication. It serves only CometChat's public documentation and does not request, store, or transmit your code, prompts, or personal data. Standard request metadata (such as IP address) may be processed transiently for rate limiting and abuse prevention.
+**Docs tools.** Read-only, with no account, API key or authentication. It serves CometChat's public documentation and does not request, store or transmit your code, prompts or personal data.
+
+**Account tools.** Only used if you sign in. It passes your requests to your CometChat account and returns the results to your AI tool, which can include your users' names, emails and message text (truncated). The server stores nothing: your sign-in lives in your AI tool, sealed so only this server can read it. For security it logs one audit line per account action: a pseudonymous id for you, the tool, the app id, the ids it acted on (never message text, names or secrets), and the outcome.
+
+**Both.** Request metadata such as your IP address is processed for rate limiting and abuse prevention. Usage analytics (PostHog) receive the tool name, outcome, duration, a session id and a one-way fingerprint of your IP. They never receive tool arguments, results or account details.
 
 For full details, see CometChat's privacy policy: [`cometchat.com/legal-privacy-policy`](https://www.cometchat.com/legal-privacy-policy).
 

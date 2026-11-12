@@ -1,7 +1,7 @@
 {
   "name": "@cometchat/mcp-server",
-  "version": "0.1.7",
-  "description": "First-party CometChat MCP server. Read-only tools for searching CometChat documentation, fetching pages, and pulling implementation bundles.",
+  "version": "0.2.0",
+  "description": "First-party CometChat MCP server: search CometChat docs, fetch pages and implementation bundles, and (after signing in) manage your CometChat apps, users, settings and usage.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/server.js",
@@ -21,15 +21,17 @@
     "verify:bundles": "tsx scripts/verify-bundles.ts",
     "check": "npm run lint && npm test && npm run verify:refresh",
     "hooks:install": "git config core.hooksPath .githooks && echo 'pre-commit hook enabled (.githooks)'",
-    "inspect": "npx @modelcontextprotocol/inspector"
+    "inspect": "npx @modelcontextprotocol/inspector",
+    "revoke-sign-in": "tsx scripts/revoke-sign-in.ts"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
     "gray-matter": "^4.0.3",
     "pino": "^9.5.0",
     "posthog-node": "^5.21.2",
