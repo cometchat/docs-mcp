@@ -138,6 +138,24 @@ describe("OAuth metadata", () => {
     expect(as.code_challenge_methods_supported).toContain("S256");
     expect(as.scopes_supported).toEqual(["dashboard:read", "dashboard:write"]);
     expect(as.registration_endpoint).toBe("http://localhost/register");
+    // RFC 9207. ChatGPT uses its stable, trusted callback only when this is advertised,
+    // and it compares iss to the issuer exactly.
+    expect(as.authorization_response_iss_parameter_supported).toBe(true);
+    expect(as.issuer).toBe(prm.authorization_servers[0]);
+  });
+
+  it("puts iss on the SDK's own error redirects from /authorize", async () => {
+    const reg = (await (await fetch(`${base}/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ redirect_uris: [REDIRECT], token_endpoint_auth_method: "none" }) })).json()) as { client_id: string };
+    const u = new URL(`${base}/authorize`);
+    // Valid client and redirect, but no PKCE challenge: the SDK redirects back with an error.
+    for (const [k, v] of Object.entries({ response_type: "code", client_id: reg.client_id, redirect_uri: REDIRECT, state: "st-9" })) u.searchParams.set(k, v);
+    const res = await fetch(u, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    const back = new URL(res.headers.get("location")!);
+    expect(`${back.origin}${back.pathname}`).toBe(REDIRECT);
+    expect(back.searchParams.get("error")).toBeTruthy();
+    // (The SDK drops state on this error: it fails before reading the parameters.)
+    expect(back.searchParams.get("iss")).toBe("http://localhost/");
   });
 
   it("answers an unauthenticated /mcp/dashboard call with 401 and a resource_metadata pointer", async () => {

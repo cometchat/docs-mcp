@@ -553,6 +553,11 @@ export function redirectTrust(redirectUri: string, trustedUris: string[]): "know
   // A trusted entry is an exact callback (origin + path): any other page on
   // the same site might let an attacker read the code from its URL.
   if (u.protocol !== "https:" || u.username || u.password) return "unverified";
+  // Popular AI tools' own sites: any https page on the host or its
+  // subdomains (default port only). Matched on the host name, so a lookalike
+  // such as chatgpt.com.evil.example or a URL that only mentions the name in
+  // its path or query doesn't match.
+  if (!u.port && [...KNOWN_AI_HOSTS].some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`))) return "known";
   const at = `${u.origin}${u.pathname}`;
   return trustedUris.some((t) => {
     try {
@@ -572,7 +577,16 @@ const handleHash = (h: string) => createHash("sha256").update(`signin:${h}`).dig
 /** Schemes that pass the URL to a browser or web page (Android intents, iOS browser hand-offs). */
 const HANDOFF_SCHEMES = /^(intent|x-safari-https?|googlechromes?|microsoft-edge(-https?)?|firefox|opera-https?|brave|javascript|data|vbscript|file|blob|about):$/i;
 /** App schemes of known MCP clients. Other app schemes count only in reverse-domain form (RFC 8252 §7.1). */
-const KNOWN_APP_SCHEMES = new Set(["cursor:", "vscode:", "vscode-insiders:", "windsurf:", "claude:", "zed:", "kiro:"]);
+const KNOWN_APP_SCHEMES = new Set(["cursor:", "vscode:", "vscode-insiders:", "windsurf:", "claude:", "zed:", "kiro:", "grokbot:"]);
+
+/**
+ * Popular AI tools whose sign-ins count as known on any https page of the host
+ * or its subdomains: ChatGPT (any chatgpt.com callback), Grok on the web (the
+ * Grok app uses grokbot:), Google Antigravity
+ * (https://antigravity.google/oauth-callback), Mistral Le Chat and Perplexity.
+ * Claude stays on its exact callbacks (DASHBOARD_TRUSTED_REDIRECT_URIS).
+ */
+const KNOWN_AI_HOSTS = new Set(["chatgpt.com", "grok.com", "antigravity.google", "chat.mistral.ai", "perplexity.ai"]);
 
 /**
  * Seconds until the dashboard token expires, read from its JWT `exp` claim.

@@ -151,6 +151,43 @@ const HOOK = { app_id: "app123", id: "backend-sync", name: "Sync", url: "https:/
 // ── 1. unverified apps ─────────────────────────────────────────────────────
 
 describe("unverified apps", () => {
+  it("trusts popular AI tools by host (or subdomain) or app scheme, never by a lookalike", () => {
+    const trusted = loadConfig().dashboardTrustedRedirectUris.split(",");
+    for (const ok of [
+      "https://chatgpt.com/connector_platform_oauth_redirect",
+      "https://chatgpt.com/connector/oauth/abc123", // ChatGPT's per-connector callback
+      "https://grok.com/oauth/callback",
+      "grokbot://mcp/oauth/callback", // the Grok app
+      "https://antigravity.google/oauth-callback",
+      "https://chat.mistral.ai/connectors/callback",
+      "https://www.perplexity.ai/oauth/callback",
+      "https://CHATGPT.com/x", // hostnames are case-insensitive
+      "https://chatgpt.com:443/x", // the default port is the same origin
+      "https://connector.chatgpt.com/cb", // subdomains of a known AI host
+      "https://perplexity.ai/cb",
+    ]) expect(redirectTrust(ok, trusted), ok).toBe("known");
+    // ChatGPT is trusted by host, not through the configured callback list.
+    expect(trusted.some((t) => t.includes("chatgpt.com"))).toBe(false);
+    for (const bad of [
+      "https://chatgpt.com.attacker.example/connector_platform_oauth_redirect",
+      "https://attacker.example/chatgpt.com/callback",
+      "https://attacker.example/cb?r=https://chatgpt.com",
+      "https://chatgpt.com.evil.example/cb",
+      "https://evilchatgpt.com/cb", // not a subdomain, just a longer name
+      "https://chatgpt.com./cb", // trailing dot is a different host name
+      "https://chаtgpt.com/cb", // Cyrillic "а": punycode host, not chatgpt.com
+      "https://chatgpt.com:8443/cb",
+      "http://chatgpt.com/cb",
+      "https://user@chatgpt.com/cb",
+      "https://grok.com.evil.example/cb",
+      "https://notgrok.com/cb",
+      "https://antigravity.google.evil.example/oauth-callback",
+    ]) expect(redirectTrust(bad, trusted), bad).toBe("unverified");
+    // Claude stays on its exact callbacks.
+    expect(redirectTrust("https://claude.ai/api/mcp/auth_callback", trusted)).toBe("known");
+    expect(redirectTrust("https://claude.ai/artifact/abc", trusted)).toBe("unverified");
+  });
+
   it("classifies redirects: loopback, app schemes and trusted hosts are known; other https is unverified", () => {
     const trusted = ["https://claude.ai/api/mcp/auth_callback"];
     expect(redirectTrust("http://localhost:7777/cb", trusted)).toBe("known");

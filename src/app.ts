@@ -19,6 +19,7 @@ import type { IndexRefresher } from "./index/refresher.js";
 import { refreshView, wantsDetail } from "./lib/health.js";
 import { buildMcpServer, SERVER_VERSION } from "./mcp.js";
 import { createOAuthMetadata, mcpAuthMetadataRouter, mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { metadataHandler } from "@modelcontextprotocol/sdk/server/auth/handlers/metadata.js";
 import { dashboardBearer } from "./dashboard/bearer.js";
 import { CALLBACK_NONCE, CALLBACK_PATH, DashboardOAuthProvider, DISCONNECT_PATH, POLL_PATH, SIGNIN_BROWSER_COOKIE, disconnectPage, page, sendHtml, parseRevocations, signInCallbackPath } from "./dashboard/oauth.js";
 import { actorId, configureActorKey, signInActor } from "./dashboard/actor.js";
@@ -345,6 +346,25 @@ export function createApp(deps: AppDeps): Express {
       // trust-proxy checks don't apply.
       validate: { xForwardedForHeader: false, trustProxy: false },
     };
+    // RFC 9207: every authorization response carries `iss`, so say so. ChatGPT
+    // then uses its stable callback (https://chatgpt.com/connector_platform_oauth_redirect;
+    // any chatgpt.com address is trusted, see KNOWN_AI_HOSTS). Once this
+    // is advertised, ChatGPT and Codex reject an authorization response without
+    // `iss`, so it is added to the SDK's own error redirects below. Mounted before
+    // the SDK router, which serves the same path without the flag.
+    const asMetadata = {
+      ...createOAuthMetadata({ provider, issuerUrl, serviceDocumentationUrl: new URL("https://www.cometchat.com/docs/mcp-server"), scopesSupported: [READ_SCOPE, WRITE_SCOPE] }),
+      authorization_response_iss_parameter_supported: true,
+    };
+    app.use("/.well-known/oauth-authorization-server", metadataHandler(asMetadata));
+    app.use("/authorize", (_req, res, next) => {
+      const redirect = res.redirect.bind(res) as (status: number, url: string) => void;
+      res.redirect = ((a: number | string, b?: string | number) => {
+        const [status, url] = typeof a === "number" ? [a, String(b)] : [typeof b === "number" ? b : 302, a];
+        redirect(status, withIssuer(url, issuerUrl.href));
+      }) as typeof res.redirect;
+      next();
+    });
     app.use(
       mcpAuthRouter({
         provider,
@@ -490,7 +510,7 @@ export function createApp(deps: AppDeps): Express {
       // to /mcp find the sign-in there and get tokens for /mcp.
       app.use(
         mcpAuthMetadataRouter({
-          oauthMetadata: createOAuthMetadata({ provider, issuerUrl, scopesSupported: [READ_SCOPE, WRITE_SCOPE] }),
+          oauthMetadata: asMetadata,
           resourceServerUrl: mcpResourceUrl,
           scopesSupported: [READ_SCOPE, WRITE_SCOPE],
           resourceName: "CometChat",
@@ -631,4 +651,24 @@ function callsDashboardTool(body: unknown): boolean {
     const msg = m as { method?: unknown; params?: { name?: unknown } } | null;
     return msg?.method === "tools/call" && typeof msg.params?.name === "string" && DASHBOARD_TOOL_NAMES.has(msg.params.name);
   });
+}
+
+/**
+ * Sets `iss` (RFC 9207) on an authorization response redirect (one with a code
+ * or an error). Always overwrites: a client can register a redirect_uri that
+ * already carries its own `iss` in the query.
+ */
+export function withIssuer(url: string, issuer: string): string {
+  try {
+    const u = new URL(url);
+    if (u.searchParams.has("code") || u.searchParams.has("error")) {
+      if (u.searchParams.getAll("iss").length === 1 && u.searchParams.get("iss") === issuer) return url;
+      u.searchParams.delete("iss");
+      u.searchParams.set("iss", issuer);
+      return u.href;
+    }
+  } catch {
+    // not a URL: leave it alone
+  }
+  return url;
 }

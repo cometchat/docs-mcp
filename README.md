@@ -132,7 +132,7 @@ CometChat is a real-time communications platform for adding chat, voice, and vid
 | Field | Value |
 |---|---|
 | Display name | CometChat Docs |
-| Version | 0.2.0 |
+| Version | 0.2.1 |
 | Protocol | MCP `2025-11-25`; earlier protocol versions are negotiated down |
 | Transport | Streamable HTTP (with SSE) |
 | Authentication | None for the docs tools. OAuth 2.1 sign-in with your CometChat account for the account tools, on the same `/mcp` endpoint |
@@ -294,7 +294,7 @@ The same server URL is listed in these registries and directories:
 
 **What it can and can't do.** When you connect, the sign-in page lists what the tool will be able to do. It can delete users, groups, messages, API keys, webhooks, roles, moderation lists and rules, and push providers, always after your approval. It can't delete apps, change billing, transfer ownership or ban users. A read-only connection can still read your app credentials, including the Auth Key; other API key values are masked.
 
-**Unverified apps.** Anyone can register a client with any name. If the address your browser returns to isn't a known AI tool (one running on your machine, or claude.ai's own connector callback), the page marks it **unverified** and it only gets read-only access. The page shows the app's icon: ours for a known app (by where it returns to, not its name), otherwise the logo the app registered (never for an unverified app), otherwise the first letter of its name. The icon only helps you recognise the app; the name and the return address are what to check.
+**Unverified apps.** Anyone can register a client with any name. If the address your browser returns to isn't a known AI tool (one running on your machine, claude.ai's connector callback, or a page on ChatGPT, Grok, Antigravity, Mistral Le Chat or Perplexity), the page marks it **unverified** and it only gets read-only access. A ChatGPT, Grok or Antigravity connection made before 0.2.1 still shows as unverified: remove it and add it again. The page shows the app's icon: ours for a known app (by where it returns to, not its name), otherwise the logo the app registered (never for an unverified app), otherwise the first letter of its name. The icon only helps you recognise the app; the name and the return address are what to check.
 
 **High-risk changes need your approval in the browser.** Creating webhooks, API keys or login tokens, inviting team members, changing app settings, replacing the OpenAI key and every delete each give your AI tool a link. Open it in the browser where you connected your AI tool, check the exact details, and approve; you get a short code to give back to your AI tool. The code works once, for that exact change, for up to 10 minutes. This guards against text inside your app (a message, a user name) talking your AI tool into one of these changes. Only approve changes you asked for, and only sign in to CometChat from a link your own AI tool opened when you connected it. Secret values on the approval page show only their last 4 characters. If your AI tool can control your browser, it could also press Approve, so don't rely on approval in that setup. Other changes ask for your OK in the chat.
 

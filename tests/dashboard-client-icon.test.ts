@@ -16,6 +16,14 @@ describe("known apps are matched by where the sign-in returns to", () => {
     ["cursor://anysphere.cursor-mcp/oauth/callback", "Cursor"],
     ["windsurf://codeium.windsurf/mcp-callback", "Windsurf"],
     ["zed://mcp/oauth/callback", "Zed"],
+    ["https://chatgpt.com/connector_platform_oauth_redirect", "ChatGPT"],
+    ["https://chatgpt.com/connector/oauth/abc123", "ChatGPT"],
+    ["https://chat.mistral.ai/connectors/callback", "Le Chat"],
+    ["https://www.perplexity.ai/oauth/callback", "Perplexity"],
+    ["grokbot://mcp/oauth/callback", "Grok"],
+    ["https://grok.com/oauth/callback", "Grok"],
+    ["https://antigravity.google/oauth-callback", "Antigravity"],
+    ["kiro://kiro.kiroAgent/authenticate-success", "Kiro"],
   ])("%s → %s", (uri, app) => {
     expect(knownAppIcon(uri)).toMatchObject({ kind: "app", app });
   });
@@ -27,6 +35,11 @@ describe("known apps are matched by where the sign-in returns to", () => {
     "https://evil.example/api/mcp/auth_callback",
     "http://127.0.0.1:5555/callback", // anything local can claim to be Claude Code
     "http://localhost:7777/callback",
+    "https://chatgpt.com.evil.example/cb", // lookalike host
+    "http://chatgpt.com/cb",
+    "https://chatgpt.com:8443/cb",
+    "https://antigravity.google.evil.example/oauth-callback",
+    "https://grok.com.evil.example/cb",
   ])("%s → no bundled icon", (uri) => {
     expect(knownAppIcon(uri)).toBeUndefined();
   });

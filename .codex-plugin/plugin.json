@@ -1,6 +1,6 @@
 {
   "name": "cometchat",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Add real-time chat, voice, video, and moderation to your app. Codex reads CometChat documentation, fetches reference pages, and pulls implementation bundles built from the current docs for React, Angular, React Native, Flutter, iOS, Android, the JavaScript SDK, the no-code widget, moderation, multi-tenant chat, and presence. Sign in with your CometChat account to also manage your apps, users, groups, settings, API keys, webhooks, moderation and push setup; edits and deletes ask for your confirmation first. The docs tools need no sign-in.",
   "author": {
     "name": "CometChat",
