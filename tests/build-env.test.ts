@@ -11,6 +11,7 @@ describe("index-build child environment", () => {
     "POSTHOG_KEY",
     "POSTHOG_HOST",
     "HEALTH_DETAIL_TOKEN",
+    "OPENAI_APPS_CHALLENGE",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",

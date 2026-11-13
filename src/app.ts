@@ -129,6 +129,15 @@ export function createApp(deps: AppDeps): Express {
     });
   });
 
+  if (config.openaiAppsChallenge) {
+    // OpenAI polls this exact path and expects the configured verification
+    // token as the unadorned response body before accepting the Apps domain.
+    app.get("/.well-known/openai-apps-challenge", (_req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      res.type("text/plain").send(config.openaiAppsChallenge);
+    });
+  }
+
   app.get("/health", (req, res) => {
     const indexReady = searchClient.isReady();
     const indexAgeSeconds = searchClient.indexAgeSeconds();

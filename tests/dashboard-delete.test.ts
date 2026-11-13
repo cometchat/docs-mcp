@@ -82,11 +82,10 @@ describe("delete tool definitions", () => {
     }
   });
 
-  it("adding group members asks for confirmation but isn't marked destructive", () => {
+  it("marks adding group members destructive because it grants or changes access", () => {
     const def = visibleDashboardTools(session).find((d) => d.name === "cometchat_add_group_members")!;
     expect(spec("cometchat_add_group_members").confirm).toBe(true);
-    expect(def.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
-    // Other confirmed writes stay destructive.
+    expect(def.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(visibleDashboardTools(session).find((d) => d.name === "cometchat_remove_group_member")!.annotations).toMatchObject({ destructiveHint: true });
   });
 

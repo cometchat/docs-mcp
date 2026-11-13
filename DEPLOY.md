@@ -64,6 +64,7 @@ CI runs it as the `search-eval` job in `ci.yml`, on the `cometchat/docs` commit 
 | `ALLOWED_ORIGINS` | _unset_ | Comma-separated browser `Origin` allowlist for `/mcp`. Unset allows no browser origin (`403`); requests without an `Origin` are unaffected. |
 | `DNS_REBINDING_PROTECTION` | `true` | Set `false` to disable. |
 | `NODE_ENV` | `development` | Standard Node.js setting (Express production mode); set `production` in containers. |
+| `OPENAI_APPS_CHALLENGE` | _unset_ | OpenAI Apps domain-verification token. When set, `/.well-known/openai-apps-challenge` returns this exact value as plain text; when unset, the route is absent. |
 | `RATE_LIMIT_ENABLED` | `true` | Per-IP rate limit on `/mcp`. Set `false` for dev or behind an upstream limiter. Exactly `true` or `false`; any other value fails startup. |
 | `RATE_LIMIT_MAX` | `120` | Max requests per window per IP. A positive integer: `0` or a non-number fails startup rather than silently switching the limiter off (use `RATE_LIMIT_ENABLED=false`). |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Window in ms. A positive integer. |

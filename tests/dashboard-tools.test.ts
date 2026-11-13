@@ -67,7 +67,18 @@ describe("tool definitions", () => {
         expect(typeof t.describe).toBe("function");
       }
     }
-    for (const d of visibleDashboardTools(session)) expect(d.annotations.readOnlyHint).toBe(ALL_DASHBOARD_TOOLS.find((t) => t.name === d.name)!.access === "read");
+    for (const d of visibleDashboardTools(session)) {
+      const source = ALL_DASHBOARD_TOOLS.find((t) => t.name === d.name)!;
+      expect(d.annotations).toMatchObject({
+        readOnlyHint: source.access === "read",
+        destructiveHint: source.access === "write" ? (source.destructive ?? !!source.confirm) : false,
+        idempotentHint: source.access === "read",
+        openWorldHint: true,
+      });
+      for (const key of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const) {
+        expect(typeof d.annotations[key], `${d.name}.${key}`).toBe("boolean");
+      }
+    }
   });
 });
 

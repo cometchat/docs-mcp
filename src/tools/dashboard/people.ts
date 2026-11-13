@@ -297,9 +297,9 @@ export const PEOPLE_TOOLS = [
     ),
     outputSchema: appOutput({ guid: str("Group ID"), added: num("Users sent to CometChat") }, ["guid", "added"]),
     access: "write",
-    // Additive: it removes no one and deletes nothing (it can change an existing member's
-    // role, which the description says), so not marked destructive. Still asks for confirmation.
-    destructive: false,
+    // Adding an admin or moderator grants access and can change an existing
+    // member's role, so directory review treats this as a destructive change.
+    destructive: true,
     confirm: true,
     describe: (a) => `Add members to group ${String(a.guid)} on app ${String(a.app_id)}: ${["participants", "moderators", "admins"].filter((k) => Array.isArray(a[k]) && (a[k] as unknown[]).length).map((k) => `${k}: ${(a[k] as string[]).join(", ")}`).join("; ")}.`,
     async run(a, { client }) {

@@ -85,7 +85,8 @@ export function toolDefinition(t: DashboardToolSpec) {
     annotations: {
       title: t.title,
       readOnlyHint: t.access === "read",
-      ...(t.access === "write" ? { destructiveHint: t.destructive ?? !!t.confirm, idempotentHint: false } : {}),
+      destructiveHint: t.access === "write" ? (t.destructive ?? !!t.confirm) : false,
+      idempotentHint: t.access === "read",
       openWorldHint: true,
     },
   };

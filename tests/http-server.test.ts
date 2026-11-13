@@ -366,6 +366,25 @@ describe("/mcp — browser origins", () => {
   });
 });
 
+describe("GET /.well-known/openai-apps-challenge", () => {
+  it("serves the OpenAI domain-verification token as plain text", async () => {
+    const port = await start({ openaiAppsChallenge: "test-openai-challenge" });
+    const r = await request(port, { method: "GET", path: "/.well-known/openai-apps-challenge" });
+
+    expect(r.status).toBe(200);
+    expect(r.headers["content-type"]).toMatch(/^text\/plain/);
+    expect(r.headers["cache-control"]).toBe("no-store");
+    expect(r.body).toBe("test-openai-challenge");
+  });
+
+  it("is absent when OPENAI_APPS_CHALLENGE is not configured", async () => {
+    const port = await start({ openaiAppsChallenge: undefined });
+    const r = await request(port, { method: "GET", path: "/.well-known/openai-apps-challenge" });
+
+    expect(r.status).toBe(404);
+  });
+});
+
 describe("/mcp — rate limiting", () => {
   it("returns 429 with Retry-After once max requests are used", async () => {
     const port = await start({ rateLimitMax: 2, rateLimitWindowMs: 60_000 });

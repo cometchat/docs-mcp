@@ -27,6 +27,8 @@ const ConfigSchema = z.object({
   docsCommitPin: z.string().optional(),
   /** Unlocks the diagnostic fields on /health. Unset = never released. */
   healthDetailToken: z.string().optional(),
+  /** OpenAI Apps domain-verification token. Unset = challenge route is absent. */
+  openaiAppsChallenge: z.string().trim().min(1).optional(),
   // Per-IP rate limit on /mcp. Validated here so a bad value stops startup:
   // parsed ad hoc, a non-numeric max silently disabled the limiter and a
   // non-numeric window made every bucket's reset time NaN (a permanent 429).
@@ -149,6 +151,7 @@ export function loadConfig(): Config {
     docsRef: env("DOCS_REF"),
     docsCommitPin: env("DOCS_COMMIT_PIN"),
     healthDetailToken: env("HEALTH_DETAIL_TOKEN"),
+    openaiAppsChallenge: env("OPENAI_APPS_CHALLENGE"),
     rateLimitEnabled: env("RATE_LIMIT_ENABLED"),
     rateLimitMax: env("RATE_LIMIT_MAX"),
     rateLimitWindowMs: env("RATE_LIMIT_WINDOW_MS"),
